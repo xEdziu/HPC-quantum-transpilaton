@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+dist/
+
+# CMake / C++
+build/
+out/
+
+# Wyniki i profile
+results/
+*.nsys-rep
+*.ncu-rep
+*.sqlite
