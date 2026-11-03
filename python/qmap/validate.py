@@ -18,10 +18,20 @@ Checks:
      over the draw of V (a fixed V could be blind to some errors). Requiring the
      all-zero projection on the ancillas as well checks that they are returned to |0>.
 """
+import argparse
+import json
+import sys
+
+import numpy as np
 from qiskit import QuantumCircuit
 from qiskit.converters import circuit_to_dag
 from qiskit.transpiler import PassManager
 from qiskit.transpiler.passes import CheckMap
+from qiskit_aer import AerSimulator
+import qiskit_aer.library  # noqa: F401  (adds save_amplitudes_squared to QuantumCircuit)
+
+from qmap.device import load_device
+from qmap.instances import load_instance, loads
 
 
 def check_map(routed, coupling_map):
@@ -64,3 +74,65 @@ def check_structural(original, routed, initial, final):
     for inst in logical.data:
         same.append(inst.operation, [original.qubits[logical.find_bit(q).index] for q in inst.qubits])
     return derived == list(final) and circuit_to_dag(same) == circuit_to_dag(original)
+
+
+def _random_prep(n, rng):
+    """Random single-qubit U layer, CX on pairs (i, i+1) for even i, another U layer."""
+    v = QuantumCircuit(n)
+    for layer in range(2):
+        for q, (t, p, l) in enumerate(rng.uniform(0, 2 * np.pi, (n, 3))):
+            v.u(t, p, l, q)
+        if layer == 0:
+            for q in range(0, n - 1, 2):
+                v.cx(q, q + 1)
+    return v
+
+
+def statevector_fidelity(original, routed, initial, final, seed):
+    n, n_phys = original.num_qubits, routed.num_qubits
+    v = _random_prep(n, np.random.default_rng(seed))
+    qc = QuantumCircuit(n_phys)
+    qc.compose(v, qubits=list(initial), inplace=True)
+    qc.compose(routed, inplace=True)
+    qc.compose(v.compose(original).inverse(), qubits=list(final), inplace=True)
+    qc.save_amplitudes_squared([0], label="p0")
+    sim = AerSimulator(method="statevector", precision="double")
+    return float(sim.run(qc).result().data()["p0"][0])
+
+
+def check_statevector(original, routed, initial, final, k=3, tol=1e-8, seed=0):
+    fids = [statevector_fidelity(original, routed, initial, final, seed + j) for j in range(k)]
+    return all(f >= 1 - tol for f in fids), fids
+
+
+def validate(original, routed, initial, final, coupling_map, k=3):
+    report = {
+        "check_map": check_map(routed, coupling_map),
+        "structural": check_structural(original, routed, initial, final),
+    }
+    report["statevector"], report["fidelities"] = check_statevector(original, routed, initial, final, k=k)
+    report["swaps"] = routed.count_ops().get("swap", 0)
+    report["valid"] = report["check_map"] and report["structural"] and report["statevector"]
+    return report
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Validate a routed circuit.")
+    ap.add_argument("--instance", required=True)
+    ap.add_argument("--routed", required=True)
+    ap.add_argument("--layout", required=True)
+    ap.add_argument("--k", type=int, default=3)
+    args = ap.parse_args()
+    original = load_instance(args.instance)
+    with open(args.routed, encoding="utf-8") as f:
+        routed = loads(f.read())
+    with open(args.layout, encoding="utf-8") as f:
+        layout = json.load(f)
+    _, cm = load_device()
+    report = validate(original, routed, layout["initial"], layout["final"], cm, k=args.k)
+    print(json.dumps(report, indent=2))
+    sys.exit(0 if report["valid"] else 1)
+
+
+if __name__ == "__main__":
+    main()
