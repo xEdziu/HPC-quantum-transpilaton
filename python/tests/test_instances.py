@@ -3,7 +3,7 @@ from qiskit import qasm2
 from qiskit.quantum_info import Operator
 
 from qmap.instances import (BASIS, QAOA_SIZES, QFT_SIZES, canonicalize,
-                            load_instance, qaoa, qft, SEED)
+                            load_instance, loads, qaoa, qft, SEED)
 
 NAMES = [f"qft_n{n}" for n in QFT_SIZES] + [f"qaoa_n{n}" for n in QAOA_SIZES]
 
@@ -31,4 +31,4 @@ def test_file_equivalent_to_original(name, make):
 @pytest.mark.parametrize("name", ["qft_n8", "qaoa_n8"])
 def test_qasm_round_trip(name):
     qc = load_instance(name)
-    assert Operator(qc).equiv(Operator(qasm2.loads(qasm2.dumps(qc))))
+    assert Operator(qc).equiv(Operator(loads(qasm2.dumps(qc))))

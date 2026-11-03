@@ -45,8 +45,14 @@ def write_all(directory=INSTANCES_DIR):
             f.write(text)
 
 
+# qasm2.load defaults to the strict OpenQASM 2.0 qelib1.inc, which lacks `sx`;
+# the legacy set matches the gate definitions that qasm2.dumps emits.
+def loads(text):
+    return qasm2.loads(text, custom_instructions=qasm2.LEGACY_CUSTOM_INSTRUCTIONS)
+
+
 def load_instance(name, directory=INSTANCES_DIR):
-    return qasm2.load(str(Path(directory) / f"{name}.qasm"))
+    return loads((Path(directory) / f"{name}.qasm").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
