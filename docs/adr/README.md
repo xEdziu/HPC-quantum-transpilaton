@@ -10,6 +10,7 @@ Format: [MADR](https://adr.github.io/madr/), po polsku. Szablon: [0000-szablon.m
 | [0002](0002-podzial-python-cpp-cuda.md) | Podział Python / C++ / CUDA | Zaakceptowana |
 | [0003](0003-urzadzenie-falcon27.md) | Urządzenie Falcon 27q, routing nieskierowany, bez szumu | Zaakceptowana |
 | [0004](0004-obwody-kanoniczne.md) | Obwody kanoniczne | Zaakceptowana |
+| [0006](0006-walidacja.md) | Walidacja: test strukturalny + globalny wektor stanu | Zaakceptowana |
 
 ## Jak dodać ADR
 
