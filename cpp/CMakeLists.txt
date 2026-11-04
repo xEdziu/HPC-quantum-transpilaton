@@ -16,3 +16,7 @@ FetchContent_Declare(
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(json)
+
+add_library(qmap_core STATIC src/device.cpp src/qasm_io.cpp)
+target_include_directories(qmap_core PUBLIC include)
+target_link_libraries(qmap_core PUBLIC nlohmann_json::nlohmann_json)
