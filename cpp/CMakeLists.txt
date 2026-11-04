@@ -48,3 +48,6 @@ add_executable(qmap_gpu_tests tests/test_gpu.cpp)
 target_link_libraries(qmap_gpu_tests PRIVATE qmap_gpu)
 target_compile_definitions(qmap_gpu_tests PRIVATE QMAP_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data")
 add_test(NAME qmap_gpu_tests COMMAND qmap_gpu_tests)
+
+add_executable(qmap_ga src/ga_main.cpp)
+target_link_libraries(qmap_ga PRIVATE qmap_core qmap_gpu CUDA::nvtx3)
