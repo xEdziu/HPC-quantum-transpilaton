@@ -11,6 +11,9 @@ import json
 import math
 from pathlib import Path, PureWindowsPath
 
+import numpy as np
+import pandas as pd
+
 DEFAULT_CONFIGS = ["rtx5080", "rtx5080+rtx3060", "rtx5080+rtx5070", "rtx5080+rtx5070+rtx3060"]
 DEFAULT_EPS = [0.10, 0.05, 0.02]
 
@@ -125,6 +128,130 @@ def cmd_pilot(a):
         print(r)
 
 
+def load_runs(runs_dir):
+    """One row per run (summary.json); throughput = sum over ranks of mean evals_per_s, if all rank CSVs exist."""
+    rows = []
+    for sp in sorted(Path(runs_dir).rglob("summary.json")):
+        rel = sp.parent.relative_to(runs_dir).parts
+        if len(rel) != 4:
+            continue
+        s = json.loads(sp.read_text(encoding="utf-8"))
+        csvs = sorted(sp.parent.glob("run_r*.csv"))
+        thr = sum(pd.read_csv(c)["evals_per_s"].mean() for c in csvs) if len(csvs) == s["n_ranks"] else math.nan
+        vp = sp.parent / "validate.json"
+        rows.append({
+            "config": rel[0], "instance": rel[1], "eps": rel[2], "rep": int(rel[3][3:]), "dir": str(sp.parent),
+            "best": s["best"], "target": s["target"], "n_ranks": s["n_ranks"],
+            "ttt_s": math.nan if s["ttt_s"] is None else s["ttt_s"], "throughput": thr,
+            "valid": json.loads(vp.read_text(encoding="utf-8"))["valid"] if vp.exists() else None,
+        })
+    return pd.DataFrame(rows)
+
+
+def censored_median(ttts, n):
+    """Lower median of n runs where the runs missing from ttts are censored (+inf); NaN if undefined."""
+    k = math.ceil(n / 2)
+    s = sorted(ttts)
+    return s[k - 1] if k <= len(s) else math.nan
+
+
+def aggregate_runs(df, baseline="rtx5080"):
+    """Per (config, instance, eps): success rate, censored median TTT, IQR of successes, speedup, efficiency."""
+    rows = []
+    for (config, instance, eps), g in df.groupby(["config", "instance", "eps"]):
+        ok = g["ttt_s"].dropna().to_numpy()
+        checked = [v for v in g["valid"] if v is not None]
+        rows.append({
+            "config": config, "instance": instance, "eps": eps, "target": g["target"].iloc[0], "n": len(g),
+            "successes": len(ok), "success_rate": len(ok) / len(g),
+            "median_ttt_s": censored_median(ok, len(g)),
+            "q1_ttt_s": float(np.percentile(ok, 25)) if len(ok) else math.nan,
+            "q3_ttt_s": float(np.percentile(ok, 75)) if len(ok) else math.nan,
+            "best_min": int(g["best"].min()), "throughput": g["throughput"].mean(),
+            "validated": len(checked), "valid": sum(bool(v) for v in checked),
+        })
+    out = pd.DataFrame(rows)
+    base = out[out["config"] == baseline].set_index(["instance", "eps"])
+    key = list(zip(out["instance"], out["eps"]))
+    b_ttt = pd.Series([base["median_ttt_s"].get(k, math.nan) for k in key], index=out.index)
+    b_thr = pd.Series([base["throughput"].get(k, math.nan) for k in key], index=out.index)
+    out["speedup"] = b_ttt / out["median_ttt_s"]
+    out["efficiency"] = out["speedup"] / (out["throughput"] / b_thr)  # Alba: speedup / relative compute capacity
+    return out
+
+
+def quality_table(df, sabre_csv):
+    """Best GA SWAP per instance (min over all runs) vs SABRE min / median."""
+    sabre = pd.read_csv(sabre_csv).groupby("instance")["swaps"].agg(sabre_min="min", sabre_median="median")
+    ga = df.groupby("instance")["best"].min().rename("ga_best")
+    out = pd.concat([ga, sabre], axis=1, join="inner").reset_index()
+    out["ga_over_sabre_min"] = out["ga_best"] / out["sabre_min"]
+    return out
+
+
+def cmd_aggregate(a):
+    df = load_runs(a.runs)
+    if df.empty:
+        raise SystemExit(f"aggregate: no runs under {a.runs}")
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    agg = aggregate_runs(df, a.baseline_config)
+    agg.to_csv(out / "aggregate.csv", index=False, lineterminator="\n")
+    print(agg.to_string(index=False))
+    if Path(a.sabre).exists():
+        q = quality_table(df, a.sabre)
+        q.to_csv(out / "quality.csv", index=False, lineterminator="\n")
+        print(q.to_string(index=False))
+
+
+def cmd_validate_runs(a):
+    from qmap.device import load_device
+    from qmap.instances import load_instance, loads
+    from qmap.validate import validate
+
+    _, cm = load_device()
+    for sp in sorted(Path(a.runs).rglob("best.json")):
+        if (sp.parent / "validate.json").exists() or not (sp.parent / "best.qasm").exists():
+            continue
+        instance = sp.parent.parent.parent.name
+        layout = json.loads(sp.read_text(encoding="utf-8"))
+        routed = loads((sp.parent / "best.qasm").read_text(encoding="utf-8"))
+        report = validate(load_instance(instance), routed, layout["initial"], layout["final"], cm, k=1)
+        (sp.parent / "validate.json").write_text(json.dumps(
+            {"valid": bool(report["valid"]), "swaps": report["swaps"]}) + "\n", encoding="utf-8")
+        print(sp.parent, "valid" if report["valid"] else "INVALID")
+
+
+def cmd_plot(a):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    df = load_runs(a.runs)
+    for (instance, eps), g in df.groupby(["instance", "eps"]):  # ECDF; censored runs keep the curve below 1
+        fig, ax = plt.subplots()
+        for config, c in g.groupby("config"):
+            t = np.sort(c["ttt_s"].dropna().to_numpy())
+            ax.step(t, np.arange(1, len(t) + 1) / len(c), where="post", label=f"{config} (n={len(c)})")
+        ax.set(xlabel="TTT [s]", ylabel="fraction of runs reaching target", ylim=(0, 1.02),
+               title=f"{instance}, {eps}, target {g['target'].iloc[0]}")
+        ax.legend()
+        fig.savefig(out / f"ttt_ecdf_{instance}_{eps}.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+    if a.convergence:
+        run = Path(a.convergence)
+        fig, ax = plt.subplots()
+        for c in sorted(run.glob("run_r*.csv")):
+            d = pd.read_csv(c)
+            ax.step(d["elapsed_s"], d["best"], where="post", label=c.stem.split("_")[-1])
+        ax.set(xlabel="elapsed [s]", ylabel="best SWAP", title=f"convergence: {'/'.join(run.parts[-4:])}")
+        ax.legend()
+        fig.savefig(out / f"convergence_{'_'.join(run.parts[-4:])}.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+
 def build_parser():
     ap = argparse.ArgumentParser(prog="qmap.experiments", description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -148,6 +275,23 @@ def build_parser():
     p.add_argument("--eps", nargs="+", type=float, default=DEFAULT_EPS)
     p.add_argument("--out", default="results/pilot/targets.csv")
     p.set_defaults(func=cmd_pilot)
+
+    p = sub.add_parser("aggregate", help="results/aggregate.csv (TTT, speedup, efficiency) and quality.csv")
+    p.add_argument("--runs", default="results/runs")
+    p.add_argument("--sabre", default="results/baseline/sabre.csv")
+    p.add_argument("--out", default="results")
+    p.add_argument("--baseline-config", default="rtx5080")
+    p.set_defaults(func=cmd_aggregate)
+
+    p = sub.add_parser("validate-runs", help="run qmap.validate (k=1) on every best.qasm; writes validate.json")
+    p.add_argument("--runs", default="results/runs")
+    p.set_defaults(func=cmd_validate_runs)
+
+    p = sub.add_parser("plot", help="TTT ECDF per (instance, eps); optional convergence of one run directory")
+    p.add_argument("--runs", default="results/runs")
+    p.add_argument("--out", default="results/plots")
+    p.add_argument("--convergence", help="run directory, e.g. results/runs/rtx5080/qft_n12/eps0.10/rep1")
+    p.set_defaults(func=cmd_plot)
     return ap
 
 
