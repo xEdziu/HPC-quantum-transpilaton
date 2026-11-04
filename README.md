@@ -57,7 +57,7 @@ przez `FetchContent`. Biblioteka `qmap_core` jest tylko hostowa, kod CUDA (`qmap
 cmake -S cpp -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
-build\Release\qmap_eval.exe --instance data\instances\qft_n8.qasm --device data\devicesalcon27.json
+build\Release\qmap_eval.exe --instance data\instances\qft_n8.qasm --device data\devices\falcon27.json
 ```
 
 Jeśli katalog `build` był skonfigurowany innym generatorem (np. VS 2026), usuń go przed konfiguracją.
