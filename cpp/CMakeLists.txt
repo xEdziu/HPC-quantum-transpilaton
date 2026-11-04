@@ -1,13 +1,23 @@
 cmake_minimum_required(VERSION 3.24)
-project(qmap LANGUAGES CXX)
 
+# sm_86 (RTX 3060) as SASS, sm_120 (RTX 5070/5080) as SASS + PTX.
+set(CMAKE_CUDA_ARCHITECTURES "86-real;120")
+project(qmap LANGUAGES CXX CUDA)
+
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(MSVC)
-  add_compile_options(/utf-8 /W4)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/utf-8> $<$<COMPILE_LANGUAGE:CXX>:/W4>
+                      $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>)
 endif()
+# Source line info for Nsight Compute; does not change generated code.
+add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
+
+find_package(CUDAToolkit REQUIRED)
 
 include(FetchContent)
 FetchContent_Declare(
