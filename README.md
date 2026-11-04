@@ -21,6 +21,18 @@ docs/           dokumentacja i ADR (docs/adr/)
 results/        wyniki eksperymentów (ignorowane przez git)
 ```
 
+## Instalacja (nowy komputer)
+
+Instrukcja krok po kroku: [docs/instalacja-windows.md](docs/instalacja-windows.md).
+W skrócie, w PowerShellu uruchomionym jako administrator, w katalogu repo:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\setup-windows.ps1   # VS 2022 Build Tools, CUDA 12.9, MS-MPI, CMake, uv
+```
+
+Po restarcie: `.\scripts\check-env.ps1` musi pokazać same `[ OK ]`.
+
 ## Python (uv)
 
 Środowisko zarządzane wyłącznie przez [uv](https://docs.astral.sh/uv/)
