@@ -61,13 +61,15 @@ def build_script(cluster, instances, configs, targets, reps, max_time, migration
         f"Set-Location '{cluster['repo_path']}'",
         "",
     ]
-    for config in configs:
-        members = [hosts[n] for n in config.split("+")]
+    # rep is the outermost loop so that configs interleave in time (thermal drift does not favour one config);
+    # seed = rep: identical across configs (paired comparison).
+    for rep in range(1, reps + 1):
         for instance in instances:
             for (inst, tag), target in sorted(targets.items()):
                 if inst != instance:
                     continue
-                for rep in range(1, reps + 1):  # seed = rep: identical across configs (paired comparison)
+                for config in configs:
+                    members = [hosts[n] for n in config.split("+")]
                     run_dir = f"{out}\\{config}\\{instance}\\{tag}\\rep{rep}"
                     ranks = [rank_command(cluster, h, instance, target, rep, max_time, migration, topology,
                                           run_dir, i == 0) for i, h in enumerate(members)]
