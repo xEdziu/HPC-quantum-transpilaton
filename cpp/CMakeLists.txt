@@ -17,6 +17,9 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
-add_library(qmap_core STATIC src/device.cpp src/qasm_io.cpp)
+add_library(qmap_core STATIC src/device.cpp src/qasm_io.cpp src/route_circuit.cpp)
 target_include_directories(qmap_core PUBLIC include)
 target_link_libraries(qmap_core PUBLIC nlohmann_json::nlohmann_json)
+
+add_executable(qmap_eval src/eval_main.cpp)
+target_link_libraries(qmap_eval PRIVATE qmap_core)
