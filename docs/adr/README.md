@@ -12,6 +12,7 @@ Format: [MADR](https://adr.github.io/madr/), po polsku. Szablon: [0000-szablon.m
 | [0004](0004-obwody-kanoniczne.md) | Obwody kanoniczne | Zaakceptowana |
 | [0005](0005-baseline-sabre.md) | Deterministyczny baseline SABRE (jeden przebieg `SabreLayout`) | Zaakceptowana |
 | [0006](0006-walidacja.md) | Walidacja: test strukturalny + globalny wektor stanu | Zaakceptowana |
+| [0007](0007-chromosom-router.md) | Chromosom = layout początkowy, fitness = SWAP zachłannego routera | Zaakceptowana |
 
 ## Jak dodać ADR
 
