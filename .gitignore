@@ -15,3 +15,6 @@ results/
 *.nsys-rep
 *.ncu-rep
 *.sqlite
+
+# Konfiguracja klastra (nazwy hostow)
+cluster.json
