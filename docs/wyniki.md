@@ -36,6 +36,33 @@ Naiwna wersja bazowa algorytmu genetycznego (`qmap::run_ga`, plik wykonywalny `q
   `fitness_h2d`, `fitness_kernel`, `fitness_d2h`. Operatory hosta nie mają własnych zakresów.
 - Pomiary (commit, parametry GA, sprzęt): _do uzupełnienia_.
 
+## MPI v1 (wyspy, migracja asynchroniczna)
+
+Naiwna wersja bazowa warstwy MPI (`qmap_mpi`, `qmap_ga` zawsze pod MPI; bez `mpiexec` działa jako pojedyncza wyspa).
+Decyzje: [0008](adr/0008-migracja.md), [0009](adr/0009-zakonczenie.md), [0010](adr/0010-ttt.md).
+
+- Jeden rank = jedna wyspa = jedna karta GPU (urządzenie 0 hosta), własny `--pop` na rank (MPMD); ziarno rankingu
+  `splitmix64(seed ^ (0x9E3779B97F4A7C15 · (rank + 1)))`.
+- Migracja: raz na generację (w haku `run_ga`, po ocenie): `MPI_Test` po wszystkich oczekujących wysyłkach (zakończone
+  usuwane), `MPI_Iprobe` + `MPI_Recv` wszystkiego, co dotarło, przybysz nadpisuje najgorszego osobnika. Wysyłka:
+  `MPI_Isend` z **nowym buforem na stercie dla każdego adresata**; jeden osobnik (najlepszy dotychczasowy) na migrację.
+  Topologia `all` albo `ring`; interwał `fixed:N`, `adaptiveA`, `adaptiveB` (w generacjach).
+- Zakończenie: `TAG_STOP` od rangi, która osiągnęła cel, potem `MPI_Alltoall` liczników, odebranie reszty, `MPI_Waitall`
+  i redukcje wyników (bez `MPI_Cancel`).
+- Czas: `MPI_Barrier` tuż przed `run_ga`, TTT = minimum po rangach lokalnych czasów od wyjścia z bariery.
+- Log CSV na rank (`--log` z `{rank}`): kolumny jak w GA v1 oraz `migrants_sent, migrants_received, interval`
+  (skumulowane liczby komunikatów, bieżące τ).
+- Zakresy NVTX: `mpi_migrate` (praca wysyłająca i odbierająca w generacji) i `mpi_terminate` (protokół zakończenia).
+- Pomiary (commit, parametry, sprzęt, TTT dla ε ∈ {0,10, 0,05, 0,02}): _do uzupełnienia_.
+
+Kandydaci specyficzni dla MPI (nie zaimplementowani; do sprawdzenia po profilowaniu):
+
+- Trwałe żądania (`MPI_Send_init`) lub pula buforów zamiast nowego bufora sterty na każdy `MPI_Isend`.
+- Migracja kilku osobników naraz (np. najlepsi + losowi) w jednym komunikacie.
+- Nakładanie migracji na ocenę GPU (komunikacja podczas kernela; wymaga podwójnego buforowania i strumieni).
+- Interwał migracji oparty na czasie (sekundy), nie na generacjach, aby wyspy o różnej prędkości migrowały równie
+  często w czasie rzeczywistym.
+
 ## Kandydaci do optymalizacji
 
 **Żaden z poniższych punktów nie jest zaimplementowany w v1.** To lista pomysłów do sprawdzenia po profilowaniu,

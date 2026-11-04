@@ -13,6 +13,9 @@ Format: [MADR](https://adr.github.io/madr/), po polsku. Szablon: [0000-szablon.m
 | [0005](0005-baseline-sabre.md) | Deterministyczny baseline SABRE (jeden przebieg `SabreLayout`) | Zaakceptowana |
 | [0006](0006-walidacja.md) | Walidacja: test strukturalny + globalny wektor stanu | Zaakceptowana |
 | [0007](0007-chromosom-router.md) | Chromosom = layout początkowy, fitness = SWAP zachłannego routera | Zaakceptowana |
+| [0008](0008-migracja.md) | Asynchroniczna migracja najlepszego osobnika (all/ring, stały i adaptacyjny interwał) | Zaakceptowana |
+| [0009](0009-zakonczenie.md) | Protokół zakończenia bez gubienia komunikatów | Zaakceptowana |
+| [0010](0010-ttt.md) | Definicja Time-to-Target i poziomy celu | Zaakceptowana |
 
 ## Jak dodać ADR
 

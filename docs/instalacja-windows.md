@@ -107,6 +107,58 @@ Bez tego `ncu` na kartach GeForce zgłasza `ERR_NVGPUCTRPERM`.
 2. Menu **Pulpit** → zaznacz **Włącz ustawienia dewelopera**.
 3. **Deweloper → Zarządzaj licznikami wydajności GPU** → **Zezwalaj na dostęp wszystkim użytkownikom**.
 
+## Krok 7. Klaster MPI (kilka komputerów)
+
+> **Do zweryfikowania przez zespół na prawdziwej sieci LAN.** Poniższa procedura jest przygotowana na podstawie
+> dokumentacji MS-MPI i nie była jeszcze przetestowana na trzech komputerach.
+
+Na każdym hoście (komputery `HOST_A`, `HOST_B`, `HOST_C`; sieć LAN ustawiona jako **prywatna**):
+
+1. **Ta sama ścieżka do repozytorium i zbudowanego pliku wykonywalnego** na każdym hoście, np.
+   `E:\mgr\sem2\HPC-quantum-transpilaton\build\Release\qmap_ga.exe` (ten sam układ katalogów, w tym `data\`).
+   Zbuduj projekt (Krok 5) na każdym komputerze osobno albo skopiuj `build\Release` i `data`; wersje muszą być
+   identyczne.
+2. **Usługa `smpd`.** Albo usługa MS-MPI Launch Service (`msmpilaunchsvc`, instalowana z MS-MPI; sprawdź w
+   `services.msc`, że działa), albo ręcznie w osobnym oknie PowerShell na każdym hoście:
+   ```powershell
+   & "C:\Program Files\Microsoft MPI\Bin\smpd.exe" -d
+   ```
+3. **Zapora Windows** (PowerShell jako administrator, na każdym hoście): zezwól na `smpd.exe`, `mpiexec.exe` i
+   `qmap_ga.exe` w profilu **Prywatnym** (ścieżkę do `qmap_ga.exe` dostosuj):
+   ```powershell
+   $rules = @{
+     "MS-MPI smpd"    = "C:\Program Files\Microsoft MPI\Bin\smpd.exe"
+     "MS-MPI mpiexec" = "C:\Program Files\Microsoft MPI\Bin\mpiexec.exe"
+     "qmap_ga"        = "E:\mgr\sem2\HPC-quantum-transpilaton\build\Release\qmap_ga.exe"
+   }
+   foreach ($n in $rules.Keys) {
+     New-NetFirewallRule -DisplayName $n -Program $rules[$n] -Direction Inbound -Action Allow -Profile Private
+   }
+   ```
+4. **Użytkownik.** Najprościej to samo konto Windows z tym samym hasłem na wszystkich hostach. Inaczej podaj dane
+   jawnie: `mpiexec -pwd <hasło> ...` (lub `-user`, zob. `mpiexec -help2`). Pierwsze uruchomienie z `-pwd` /
+   `-savecreds` może poprosić o hasło.
+
+Test łączności (powinien wypisać nazwy obu komputerów):
+
+```powershell
+mpiexec -hosts 2 HOST_A 1 HOST_B 1 hostname
+```
+
+Przykład MPMD z różnym `--pop` na każdym hoście (liczność populacji dobrana do karty; `{rank}` w `--log` daje osobny
+plik na rank, ale zapisywany na dysku danego hosta):
+
+```powershell
+mpiexec -n 1 -host HOST_A build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 1000000 --target 20 --max-time 120 --migration adaptiveB --log results\run_r{rank}.csv --out-qasm results\best.qasm --out-layout results\best.json : -n 1 -host HOST_B build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 400000 --target 20 --max-time 120 --migration adaptiveB --log results\run_r{rank}.csv : -n 1 -host HOST_C build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 200000 --target 20 --max-time 120 --migration adaptiveB --log results\run_r{rank}.csv
+```
+
+Uruchamiaj z katalogu repo (ścieżki względne `build\...`, `data\...` muszą istnieć u każdego hosta w tym samym
+katalogu roboczym; `mpiexec` przekazuje katalog bieżący). Wyniki (`--out-qasm`, `--out-layout`) zapisuje wyłącznie
+rank 0. Wartość `--target 20` jest tylko przykładem; poziomy celu opisuje [ADR 0010](adr/0010-ttt.md).
+
+Typowe problemy: `Failed to connect to smpd` (usługa nie działa albo zapora blokuje), błąd logowania (inne
+konto/hasło, użyj `-pwd`), `The system cannot find the file specified` (inna ścieżka do `qmap_ga.exe` na hoście).
+
 ## Problemy
 
 | Objaw | Rozwiązanie |
@@ -117,4 +169,4 @@ Bez tego `ncu` na kartach GeForce zgłasza `ERR_NVGPUCTRPERM`.
 | CMake: `No CUDA toolset found` | To samo co brak integracji CUDA z VS 2022 (wyżej). |
 | Polskie znaki „krzaczki” w plikach | Pliki zapisujemy w UTF-8; nie twórz plików przekierowaniem `>` w PowerShellu 5.1. |
 
-Konfiguracja sieci i zapory dla MPI między komputerami jest opisana osobno (etap `feature/mpi-islands`).
+Konfiguracja sieci i zapory dla MPI między komputerami: Krok 7 powyżej.
