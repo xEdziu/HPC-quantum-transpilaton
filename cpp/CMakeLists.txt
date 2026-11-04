@@ -59,6 +59,11 @@ target_link_libraries(qmap_mpi PUBLIC qmap_core PRIVATE MPI::MPI_CXX)
 add_executable(qmap_ga src/ga_main.cpp)
 target_link_libraries(qmap_ga PRIVATE qmap_core qmap_gpu qmap_mpi CUDA::nvtx3)
 
+add_executable(qmap_mpi_tests tests/test_mpi.cpp)
+target_link_libraries(qmap_mpi_tests PRIVATE qmap_mpi MPI::MPI_CXX)
+target_compile_definitions(qmap_mpi_tests PRIVATE QMAP_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data")
+add_test(NAME qmap_mpi_tests COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 3 $<TARGET_FILE:qmap_mpi_tests>)
+
 add_executable(qmap_ga_tests tests/test_ga.cpp)
 target_link_libraries(qmap_ga_tests PRIVATE qmap_core)
 target_compile_definitions(qmap_ga_tests PRIVATE QMAP_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data")
