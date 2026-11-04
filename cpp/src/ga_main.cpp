@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
 #include <nvtx3/nvToolsExt.h>
 
 #include "qmap/device.hpp"
@@ -24,7 +25,9 @@ const char* kUsage =
     "usage: qmap_ga --instance <qasm> --device <json> [--pop N] [--generations N] [--max-time S] [--target N]\n"
     "               [--seed N] [--tournament K] [--pc P] [--pm P] [--elite E] [--log <csv>]\n"
     "               [--migration fixed:N|adaptiveA|adaptiveB] [--topology all|ring] [--out-qasm <path> --out-layout <path>]\n"
-    "  --log writes one CSV per rank: results/run.csv -> results/run_r0.csv, results/run_r1.csv, ...\n";
+    "               [--summary <json>]\n"
+    "  --log writes one CSV per rank: results/run.csv -> results/run_r0.csv, results/run_r1.csv, ...\n"
+    "  --summary: rank 0 writes the global result and run parameters as JSON\n";
 
 int to_int(const std::string& a, const std::string& v) {
     size_t used = 0;
@@ -62,8 +65,10 @@ std::string with_rank(const std::string& path, int rank) {
 
 int main(int argc, char** argv) {
     qmap::MpiSession mpi(argc, argv);
-    std::string instance, device, log_path, out_qasm, out_layout;
+    std::string instance, device, log_path, out_qasm, out_layout, summary_path, migration_arg = "fixed:100",
+        topology_arg = "all";
     qmap::GaParams params;
+    uint64_t seed_arg = params.seed;  // user seed; params.seed is replaced by the per-rank seed
     qmap::MigrationPolicy migration;
     qmap::Topology topology = qmap::Topology::All;
     try {
@@ -77,16 +82,17 @@ int main(int argc, char** argv) {
             else if (a == "--generations") params.max_generations = to_int(a, v);
             else if (a == "--max-time") params.max_time_s = to_double(a, v);
             else if (a == "--target") params.target = to_int(a, v);
-            else if (a == "--seed") params.seed = to_u64(a, v);
+            else if (a == "--seed") { params.seed = to_u64(a, v); seed_arg = params.seed; }
             else if (a == "--tournament") params.tournament_k = to_int(a, v);
             else if (a == "--pc") params.p_crossover = to_double(a, v);
             else if (a == "--pm") params.p_mutation = to_double(a, v);
             else if (a == "--elite") params.elite = to_int(a, v);
             else if (a == "--log") log_path = v;
-            else if (a == "--migration") migration = qmap::parse_migration(v);
-            else if (a == "--topology") topology = qmap::parse_topology(v);
+            else if (a == "--migration") { migration = qmap::parse_migration(v); migration_arg = v; }
+            else if (a == "--topology") { topology = qmap::parse_topology(v); topology_arg = v; }
             else if (a == "--out-qasm") out_qasm = v;
             else if (a == "--out-layout") out_layout = v;
+            else if (a == "--summary") summary_path = v;
             else throw std::invalid_argument("unknown option " + a);
         }
         if (instance.empty() || device.empty()) throw std::invalid_argument("--instance and --device are required");
@@ -167,6 +173,26 @@ int main(int argc, char** argv) {
             if (global.ttt_s >= 0) std::snprintf(gttt, sizeof gttt, "%.6f", global.ttt_s);
             std::printf("global best=%d best_rank=%d ttt_s=%s evals=%lld time_s=%.6f\n", global.best_fitness,
                         global.best_rank, gttt, global.evals, global.time_s);
+
+            if (!summary_path.empty()) {
+                nlohmann::json j;
+                j["best"] = global.best_fitness;
+                j["best_rank"] = global.best_rank;
+                j["ttt_s"] = global.ttt_s >= 0 ? nlohmann::json(global.ttt_s) : nlohmann::json(nullptr);
+                j["evals"] = global.evals;
+                j["time_s"] = global.time_s;
+                j["rank0_stop"] = r.stop_reason;  // other ranks' reasons are only on stdout
+                j["instance"] = instance;
+                j["pop"] = params.pop_size;  // rank 0 only
+                j["seed"] = seed_arg;
+                j["target"] = params.target;
+                j["migration"] = migration_arg;
+                j["topology"] = topology_arg;
+                j["n_ranks"] = mpi.size();
+                std::ofstream out(summary_path, std::ios::binary);
+                if (!out) throw std::runtime_error("cannot write " + summary_path);
+                out << j.dump(2) << "\n";
+            }
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "rank=%d error: %s\n", mpi.rank(), e.what());
