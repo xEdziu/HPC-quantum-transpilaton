@@ -50,7 +50,7 @@ Decyzje: [0008](adr/0008-migracja.md), [0009](adr/0009-zakonczenie.md), [0010](a
 - Zakończenie: `TAG_STOP` od rangi, która osiągnęła cel, potem `MPI_Alltoall` liczników, odebranie reszty, `MPI_Waitall`
   i redukcje wyników (bez `MPI_Cancel`).
 - Czas: `MPI_Barrier` tuż przed `run_ga`, TTT = minimum po rangach lokalnych czasów od wyjścia z bariery.
-- Log CSV na rank (`--log` z `{rank}`): kolumny jak w GA v1 oraz `migrants_sent, migrants_received, interval`
+- Log CSV na rank (`--log results\run.csv` → `run_r<rank>.csv`): kolumny jak w GA v1 oraz `migrants_sent, migrants_received, interval`
   (skumulowane liczby komunikatów, bieżące τ).
 - Zakresy NVTX: `mpi_migrate` (praca wysyłająca i odbierająca w generacji) i `mpi_terminate` (protokół zakończenia).
 - Pomiary (commit, parametry, sprzęt, TTT dla ε ∈ {0,10, 0,05, 0,02}): _do uzupełnienia_.
