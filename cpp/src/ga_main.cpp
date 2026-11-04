@@ -1,4 +1,5 @@
-// qmap_ga: single-island GA over initial layouts, fitness evaluated on the GPU.
+// qmap_ga: island GA over initial layouts, fitness evaluated on the GPU, islands connected by MPI
+// (one rank = one island; also runs as a single island without mpiexec).
 #include <cstdio>
 #include <exception>
 #include <fstream>
@@ -11,6 +12,8 @@
 #include "qmap/device.hpp"
 #include "qmap/ga.hpp"
 #include "qmap/gpu_fitness.hpp"
+#include "qmap/island_mpi.hpp"
+#include "qmap/migration.hpp"
 #include "qmap/output.hpp"
 #include "qmap/qasm_io.hpp"
 #include "qmap/route_circuit.hpp"
@@ -20,7 +23,8 @@ namespace {
 const char* kUsage =
     "usage: qmap_ga --instance <qasm> --device <json> [--pop N] [--generations N] [--max-time S] [--target N]\n"
     "               [--seed N] [--tournament K] [--pc P] [--pm P] [--elite E] [--log <csv>]\n"
-    "               [--out-qasm <path> --out-layout <path>]\n";
+    "               [--migration fixed:N] [--topology all|ring] [--out-qasm <path> --out-layout <path>]\n"
+    "  --log may contain {rank}, replaced by the MPI rank.\n";
 
 int to_int(const std::string& a, const std::string& v) {
     size_t used = 0;
@@ -44,11 +48,21 @@ uint64_t to_u64(const std::string& a, const std::string& v) {
     return x;
 }
 
+std::string with_rank(std::string path, int rank) {
+    const std::string tag = "{rank}";
+    for (size_t pos = path.find(tag); pos != std::string::npos; pos = path.find(tag, pos))
+        path.replace(pos, tag.size(), std::to_string(rank));
+    return path;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+    qmap::MpiSession mpi(argc, argv);
     std::string instance, device, log_path, out_qasm, out_layout;
     qmap::GaParams params;
+    qmap::MigrationPolicy migration;
+    qmap::Topology topology = qmap::Topology::All;
     try {
         for (int i = 1; i < argc; ++i) {
             const std::string a = argv[i];
@@ -66,6 +80,8 @@ int main(int argc, char** argv) {
             else if (a == "--pm") params.p_mutation = to_double(a, v);
             else if (a == "--elite") params.elite = to_int(a, v);
             else if (a == "--log") log_path = v;
+            else if (a == "--migration") migration = qmap::parse_migration(v);
+            else if (a == "--topology") topology = qmap::parse_topology(v);
             else if (a == "--out-qasm") out_qasm = v;
             else if (a == "--out-layout") out_layout = v;
             else throw std::invalid_argument("unknown option " + a);
@@ -91,6 +107,11 @@ int main(int argc, char** argv) {
         const qmap::Circuit circuit = qmap::parse_qasm_file(instance);
         if (circuit.n_qubits > dev.n_phys) throw std::runtime_error("circuit has more qubits than the device");
         qmap::GpuFitness gpu(dev, qmap::two_qubit_pairs(circuit), circuit.n_qubits, params.pop_size);
+        params.seed = qmap::rank_seed(params.seed, mpi.rank());
+
+        qmap::Island island(
+            dev.n_phys, topology, migration, params.max_generations, [](const char* name) { nvtxRangePushA(name); },
+            [] { nvtxRangePop(); });
 
         const qmap::Evaluator evaluate = [&gpu](const uint8_t* pop, int pop_size, int* out) {
             nvtxRangePushA("ga_evaluate");
@@ -100,39 +121,48 @@ int main(int argc, char** argv) {
 
         std::ofstream csv;
         if (!log_path.empty()) {
-            csv.open(log_path, std::ios::binary);  // binary: "\n" endings on Windows
-            if (!csv) throw std::runtime_error("cannot write " + log_path);
-            csv << "generation,elapsed_s,best,mean,gen_time_s,eval_time_s,ops_time_s,evals,evals_per_s\n";
+            const std::string path = with_rank(log_path, mpi.rank());
+            csv.open(path, std::ios::binary);  // binary: "\n" endings on Windows
+            if (!csv) throw std::runtime_error("cannot write " + path);
+            csv << "generation,elapsed_s,best,mean,gen_time_s,eval_time_s,ops_time_s,evals,evals_per_s,"
+                   "migrants_sent,migrants_received,interval\n";
         }
-        const qmap::GenerationLog log = [&csv](const qmap::GenerationStats& s) {
+        const qmap::GenerationLog log = [&csv, &island](const qmap::GenerationStats& s) {
             if (!csv.is_open()) return;
             const double rate = s.elapsed_s > 0 ? static_cast<double>(s.evals) / s.elapsed_s : 0.0;
-            char row[256];
-            std::snprintf(row, sizeof row, "%d,%.6f,%d,%.4f,%.6f,%.6f,%.6f,%lld,%.1f\n", s.generation, s.elapsed_s,
-                          s.best, s.mean, s.gen_time_s, s.eval_time_s, s.ops_time_s, s.evals, rate);
+            const qmap::IslandStats& m = island.stats();
+            char row[320];
+            std::snprintf(row, sizeof row, "%d,%.6f,%d,%.4f,%.6f,%.6f,%.6f,%lld,%.1f,%lld,%lld,%d\n", s.generation,
+                          s.elapsed_s, s.best, s.mean, s.gen_time_s, s.eval_time_s, s.ops_time_s, s.evals, rate,
+                          m.migrants_sent, m.migrants_received, m.interval);
             csv << row;
         };
 
+        island.synchronize_start();
         nvtxRangePushA("ga_run");
-        const qmap::GaResult r = qmap::run_ga(params, dev.n_phys, evaluate, log);
+        const qmap::GaResult r = qmap::run_ga(params, dev.n_phys, evaluate, log, island.hook());
         nvtxRangePop();
         if (csv.is_open()) csv.flush();
 
-        // Sanity: the GPU fitness of the best chromosome must equal the host router's SWAP count.
-        std::vector<int> layout(r.best.begin(), r.best.begin() + circuit.n_qubits);
-        const qmap::RoutedCircuit routed = qmap::route_circuit(dev, circuit, layout);
-        if (routed.swaps != r.best_fitness)
-            throw std::runtime_error("GPU fitness " + std::to_string(r.best_fitness) +
-                                     " != host router swaps " + std::to_string(routed.swaps));
-        qmap::write_routed(dev, routed, out_qasm, out_layout);
-
         char ttt[32] = "NA";
         if (r.ttt_s >= 0) std::snprintf(ttt, sizeof ttt, "%.6f", r.ttt_s);
-        std::printf("best=%d generations=%d evals=%lld time_s=%.6f ttt_s=%s stop=%s\n", r.best_fitness, r.generations,
-                    r.evals, r.total_time_s, ttt, r.stop_reason.c_str());
+        std::printf("rank=%d best=%d generations=%d evals=%lld time_s=%.6f ttt_s=%s stop=%s migrants_sent=%lld "
+                    "migrants_received=%lld\n",
+                    mpi.rank(), r.best_fitness, r.generations, r.evals, r.total_time_s, ttt, r.stop_reason.c_str(),
+                    island.stats().migrants_sent, island.stats().migrants_received);
+
+        if (mpi.rank() == 0) {
+            // Sanity: the GPU fitness of the best chromosome must equal the host router's SWAP count.
+            std::vector<int> layout(r.best.begin(), r.best.begin() + circuit.n_qubits);
+            const qmap::RoutedCircuit routed = qmap::route_circuit(dev, circuit, layout);
+            if (routed.swaps != r.best_fitness)
+                throw std::runtime_error("GPU fitness " + std::to_string(r.best_fitness) +
+                                         " != host router swaps " + std::to_string(routed.swaps));
+            qmap::write_routed(dev, routed, out_qasm, out_layout);
+        }
     } catch (const std::exception& e) {
-        std::fprintf(stderr, "error: %s\n", e.what());
-        return 1;
+        std::fprintf(stderr, "rank=%d error: %s\n", mpi.rank(), e.what());
+        qmap::MpiSession::abort(1);
     }
     return 0;
 }
