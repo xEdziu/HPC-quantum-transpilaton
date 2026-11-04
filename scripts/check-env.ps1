@@ -56,6 +56,15 @@ Report 'CUDA <-> VS 2022 integration' $integ $(if ($integ) { 'BuildCustomization
     elseif (-not $vs2022 -or -not $nvccOk) { 'needs VS 2022 and CUDA first' }
     else { 'reinstall CUDA AFTER VS 2022 Build Tools (winget uninstall Nvidia.CUDA, then rerun setup)' })
 
+# CUDA's MSBuild integration reads CUDA_PATH_V<major>_<minor> from the process environment;
+# a terminal started before the CUDA install still has the old (empty) value.
+$cudaVar = 'CUDA_PATH_V' + ($CudaVersion -replace '\.', '_')
+$machineCuda = [Environment]::GetEnvironmentVariable($cudaVar, 'Machine')
+$shellCuda = [Environment]::GetEnvironmentVariable($cudaVar, 'Process')
+Report "$cudaVar in this shell" ([bool]$shellCuda) $(if ($shellCuda) { $shellCuda }
+    elseif ($machineCuda) { 'set system-wide but not in this shell: close ALL terminal windows (or reboot) and reopen' }
+    else { 'not set: install CUDA (scripts\setup-windows.ps1)' })
+
 Report 'MS-MPI runtime (mpiexec)' (Has mpiexec) $(if (Has mpiexec) { (Get-Command mpiexec).Source } else { 'winget install -e --id Microsoft.msmpi' })
 Report 'MS-MPI SDK' ([bool]$env:MSMPI_INC -and (Test-Path "$env:MSMPI_INC\mpi.h")) $(if ($env:MSMPI_INC) { $env:MSMPI_INC } else { 'winget install -e --id Microsoft.msmpisdk' })
 
