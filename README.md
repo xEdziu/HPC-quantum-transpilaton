@@ -65,3 +65,16 @@ Test `qmap_gpu_tests` wymaga karty NVIDIA i porównuje fitness z GPU z routerem 
 
 Test krzyżowy z walidatorem Pythona (`python/tests/test_router_crosscheck.py`) szuka
 `build/Release/qmap_eval.exe` albo zmiennej `QMAP_EVAL`; bez pliku jest pomijany.
+
+## Uruchomienie GA (jedna wyspa)
+
+Fitness liczony na GPU (`qmap_ga` wymaga karty NVIDIA). Katalog `results\` jest ignorowany przez git.
+
+```
+mkdir results
+build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 4096 --generations 200 --seed 1 --log results\ga.csv --out-qasm results\qft_n12_routed.qasm --out-layout results\qft_n12_layout.json
+uv run python -m qmap.validate --instance qft_n12 --routed results\qft_n12_routed.qasm --layout results\qft_n12_layout.json
+```
+
+Ostatnia linia wyjścia `qmap_ga`: `best=<SWAP> generations=<G> evals=<E> time_s=<T> ttt_s=<T lub NA> stop=<powód>`.
+Opcje: `--pop`, `--generations`, `--max-time`, `--target`, `--seed`, `--tournament`, `--pc`, `--pm`, `--elite`.
