@@ -66,7 +66,10 @@ Report "$cudaVar in this shell" ([bool]$shellCuda) $(if ($shellCuda) { $shellCud
     else { 'not set: install CUDA (scripts\setup-windows.ps1)' })
 
 Report 'MS-MPI runtime (mpiexec)' (Has mpiexec) $(if (Has mpiexec) { (Get-Command mpiexec).Source } else { 'winget install -e --id Microsoft.msmpi' })
-Report 'MS-MPI SDK' ([bool]$env:MSMPI_INC -and (Test-Path "$env:MSMPI_INC\mpi.h")) $(if ($env:MSMPI_INC) { $env:MSMPI_INC } else { 'winget install -e --id Microsoft.msmpisdk' })
+$machineMpi = [Environment]::GetEnvironmentVariable('MSMPI_INC', 'Machine')
+Report 'MS-MPI SDK' ([bool]$env:MSMPI_INC -and (Test-Path "$env:MSMPI_INC\mpi.h")) $(if ($env:MSMPI_INC) { $env:MSMPI_INC }
+    elseif ($machineMpi) { 'set system-wide but not in this shell: close ALL terminal windows (or reboot) and reopen' }
+    else { 'winget install -e --id Microsoft.msmpisdk' })
 
 $nsys = Get-ChildItem "$env:ProgramFiles\NVIDIA Corporation\Nsight Systems*\target-windows-x64\nsys.exe" -ErrorAction SilentlyContinue | Select-Object -Last 1
 $ncu = Get-ChildItem "$env:ProgramFiles\NVIDIA Corporation\Nsight Compute*\ncu.bat" -ErrorAction SilentlyContinue | Select-Object -Last 1
