@@ -27,7 +27,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
-add_library(qmap_core STATIC src/device.cpp src/qasm_io.cpp src/route_circuit.cpp)
+add_library(qmap_core STATIC src/device.cpp src/qasm_io.cpp src/route_circuit.cpp src/output.cpp src/ga.cpp)
 target_include_directories(qmap_core PUBLIC include)
 target_link_libraries(qmap_core PUBLIC nlohmann_json::nlohmann_json)
 
@@ -48,3 +48,11 @@ add_executable(qmap_gpu_tests tests/test_gpu.cpp)
 target_link_libraries(qmap_gpu_tests PRIVATE qmap_gpu)
 target_compile_definitions(qmap_gpu_tests PRIVATE QMAP_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data")
 add_test(NAME qmap_gpu_tests COMMAND qmap_gpu_tests)
+
+add_executable(qmap_ga src/ga_main.cpp)
+target_link_libraries(qmap_ga PRIVATE qmap_core qmap_gpu CUDA::nvtx3)
+
+add_executable(qmap_ga_tests tests/test_ga.cpp)
+target_link_libraries(qmap_ga_tests PRIVATE qmap_core)
+target_compile_definitions(qmap_ga_tests PRIVATE QMAP_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data")
+add_test(NAME qmap_ga_tests COMMAND qmap_ga_tests)

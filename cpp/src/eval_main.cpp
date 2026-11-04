@@ -1,7 +1,6 @@
 // qmap_eval: route one instance with a given initial layout and report the SWAP count.
 #include <cstdio>
 #include <exception>
-#include <fstream>
 #include <iostream>
 #include <numeric>
 #include <stdexcept>
@@ -9,9 +8,8 @@
 #include <string>
 #include <vector>
 
-#include <nlohmann/json.hpp>
-
 #include "qmap/device.hpp"
+#include "qmap/output.hpp"
 #include "qmap/qasm_io.hpp"
 #include "qmap/route_circuit.hpp"
 
@@ -34,11 +32,6 @@ std::vector<int> parse_layout(const std::string& s) {
     return v;
 }
 
-void write_file(const std::string& path, const std::string& text) {
-    std::ofstream f(path, std::ios::binary);  // binary: keep "\n" line endings on Windows
-    if (!f) throw std::runtime_error("cannot write " + path);
-    f << text;
-}
 
 }  // namespace
 
@@ -73,14 +66,7 @@ int main(int argc, char** argv) {
         const qmap::RoutedCircuit r = qmap::route_circuit(dev, circuit, layout);
 
         std::printf("swaps=%d\n", r.swaps);
-        if (!out_qasm.empty()) write_file(out_qasm, qmap::emit_qasm(dev.n_phys, r.gates));
-        if (!out_layout.empty()) {
-            nlohmann::json j;
-            j["initial"] = r.initial;
-            j["final"] = r.final_layout;
-            j["swaps"] = r.swaps;
-            write_file(out_layout, j.dump() + "\n");
-        }
+        qmap::write_routed(dev, r, out_qasm, out_layout);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n%s", e.what(), kUsage);
         return 2;
