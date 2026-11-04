@@ -135,6 +135,72 @@ struct Island::Impl {
         }
     }
 
+    void send_stop() {
+        for (int dest = 0; dest < size; ++dest) {
+            if (dest == rank) continue;
+            pending.emplace_back();
+            Pending& p = pending.back();
+            p.buf.resize(1);  // payload is empty (count 0); keep a valid pointer anyway
+            MPI_Isend(p.buf.data(), 0, MPI_BYTE, dest, kTagStop, MPI_COMM_WORLD, &p.req);
+            ++sent_to[static_cast<size_t>(dest)];
+        }
+    }
+
+    // Receive and discard the messages that are still on their way (counts come from the Alltoall).
+    void drain(const std::vector<int>& sent_to_me) {
+        std::vector<uint8_t> buf(message_bytes());
+        for (int src = 0; src < size; ++src) {
+            for (int left = sent_to_me[static_cast<size_t>(src)] - received_from[static_cast<size_t>(src)]; left > 0;
+                 --left) {
+                MPI_Status st;
+                MPI_Recv(buf.data(), static_cast<int>(buf.size()), MPI_BYTE, src, MPI_ANY_TAG, MPI_COMM_WORLD, &st);
+                ++received_from[static_cast<size_t>(src)];
+                if (st.MPI_TAG == kTagMigrant) ++stats.migrants_received;
+            }
+        }
+    }
+
+    GlobalResult finish(GaResult& local) {
+        push("mpi_terminate");
+        if (local.stop_reason == "external") local.stop_reason = "remote_stop";
+        if (local.stop_reason == "target") send_stop();  // a)
+
+        // b) Tell every rank how many messages it will receive from us.
+        std::vector<int> sent_to_me(static_cast<size_t>(size));
+        MPI_Alltoall(sent_to.data(), 1, MPI_INT, sent_to_me.data(), 1, MPI_INT, MPI_COMM_WORLD);
+        // c) Receive exactly what is still outstanding, then d) wait for our own sends.
+        drain(sent_to_me);
+        std::vector<MPI_Request> reqs;
+        for (const Pending& p : pending) reqs.push_back(p.req);
+        MPI_Waitall(static_cast<int>(reqs.size()), reqs.data(), MPI_STATUSES_IGNORE);
+        pending.clear();
+
+        // e) Reduce the results.
+        GlobalResult g;
+        struct {
+            int value, rank;
+        } mine{local.best_fitness, rank}, best{};
+        MPI_Allreduce(&mine, &best, 1, MPI_2INT, MPI_MINLOC, MPI_COMM_WORLD);
+        g.best_fitness = best.value;
+        g.best_rank = best.rank;
+        g.best = local.best;
+        g.best.resize(static_cast<size_t>(n_phys));
+        MPI_Bcast(g.best.data(), n_phys, MPI_BYTE, g.best_rank, MPI_COMM_WORLD);
+
+        const double no_ttt = 1e300;
+        const double my_ttt = local.ttt_s >= 0 ? local.ttt_s : no_ttt;
+        double ttt = no_ttt, time = 0;
+        long long evals = 0;
+        MPI_Reduce(&my_ttt, &ttt, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&local.evals, &evals, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&local.total_time_s, &time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        g.ttt_s = ttt < no_ttt ? ttt : -1;
+        g.evals = evals;
+        g.time_s = time;
+        pop();
+        return g;
+    }
+
     bool on_generation(IslandView& view) {
         push("mpi_migrate");
         reap();
@@ -178,6 +244,8 @@ void Island::synchronize_start() { MPI_Barrier(MPI_COMM_WORLD); }
 IslandHook Island::hook() {
     return [this](IslandView& view) { return impl_->on_generation(view); };
 }
+
+GlobalResult Island::finish(GaResult& local) { return impl_->finish(local); }
 
 const IslandStats& Island::stats() const { return impl_->stats; }
 

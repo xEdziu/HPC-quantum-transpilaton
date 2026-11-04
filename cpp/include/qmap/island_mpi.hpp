@@ -39,6 +39,16 @@ struct IslandStats {
     int interval = 0;                 // current migration interval tau (generations)
 };
 
+// Outcome over all ranks. best_* are valid on every rank; ttt_s, evals and time_s only on rank 0.
+struct GlobalResult {
+    int best_fitness = 0;
+    int best_rank = 0;            // rank that owns the global best (lowest rank on ties)
+    std::vector<uint8_t> best;    // its n_phys genes
+    double ttt_s = -1;            // min over ranks of the local ttt_s; < 0 if no rank reached the target
+    long long evals = 0;          // sum over ranks
+    double time_s = 0;            // max over ranks of the local total time
+};
+
 class Island {
 public:
     // max_generations caps the adaptive interval. The optional callbacks wrap the per-generation
@@ -57,6 +67,12 @@ public:
 
     // Hook for run_ga: sends/receives migrants. Returns false after a remote STOP.
     IslandHook hook();
+
+    // Termination protocol (collective: every rank must call it exactly once after run_ga, with
+    // the GaResult of its own run). A "target" rank first sends STOP to all others; then counts are
+    // exchanged, all in-flight messages are drained and awaited, and the results are reduced.
+    // Rewrites local.stop_reason "external" to "remote_stop". See docs/adr/0009-zakonczenie.md.
+    GlobalResult finish(GaResult& local);
 
     const IslandStats& stats() const;
 

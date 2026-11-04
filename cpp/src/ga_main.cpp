@@ -140,9 +140,10 @@ int main(int argc, char** argv) {
 
         island.synchronize_start();
         nvtxRangePushA("ga_run");
-        const qmap::GaResult r = qmap::run_ga(params, dev.n_phys, evaluate, log, island.hook());
+        qmap::GaResult r = qmap::run_ga(params, dev.n_phys, evaluate, log, island.hook());
         nvtxRangePop();
         if (csv.is_open()) csv.flush();
+        const qmap::GlobalResult global = island.finish(r);  // collective; also maps "external" to "remote_stop"
 
         char ttt[32] = "NA";
         if (r.ttt_s >= 0) std::snprintf(ttt, sizeof ttt, "%.6f", r.ttt_s);
@@ -153,12 +154,16 @@ int main(int argc, char** argv) {
 
         if (mpi.rank() == 0) {
             // Sanity: the GPU fitness of the best chromosome must equal the host router's SWAP count.
-            std::vector<int> layout(r.best.begin(), r.best.begin() + circuit.n_qubits);
+            std::vector<int> layout(global.best.begin(), global.best.begin() + circuit.n_qubits);
             const qmap::RoutedCircuit routed = qmap::route_circuit(dev, circuit, layout);
-            if (routed.swaps != r.best_fitness)
-                throw std::runtime_error("GPU fitness " + std::to_string(r.best_fitness) +
+            if (routed.swaps != global.best_fitness)
+                throw std::runtime_error("GPU fitness " + std::to_string(global.best_fitness) +
                                          " != host router swaps " + std::to_string(routed.swaps));
             qmap::write_routed(dev, routed, out_qasm, out_layout);
+            char gttt[32] = "NA";
+            if (global.ttt_s >= 0) std::snprintf(gttt, sizeof gttt, "%.6f", global.ttt_s);
+            std::printf("global best=%d best_rank=%d ttt_s=%s evals=%lld time_s=%.6f\n", global.best_fitness,
+                        global.best_rank, gttt, global.evals, global.time_s);
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "rank=%d error: %s\n", mpi.rank(), e.what());
