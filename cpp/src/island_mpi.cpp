@@ -61,7 +61,9 @@ struct Island::Impl {
 
     int best_fitness = INT_MAX;       // best-so-far of this island, including immigrants
     std::vector<uint8_t> best_genes;
-    int last_migration_gen = 0;
+    int last_migration_gen = 0;       // start of the current migration period
+    bool improved = false;            // see on_generation
+    bool success_in_period = false;   // improvement since the last migration (scheme B)
 
     size_t message_bytes() const { return static_cast<size_t>(n_phys) + sizeof(int); }
 
@@ -204,14 +206,29 @@ struct Island::Impl {
     bool on_generation(IslandView& view) {
         push("mpi_migrate");
         reap();
+        improved = false;  // strict improvement of the island best during this call (local or immigrant)
         if (view.best_fitness() < best_fitness) {
             best_fitness = view.best_fitness();
             best_genes.assign(view.best_genes(), view.best_genes() + n_phys);
+            improved = true;
         }
         receive_all(view);
-        if (view.generation() - last_migration_gen >= stats.interval) {
+
+        const int gen = view.generation();
+        const int cap = std::max(1, max_generations);
+        success_in_period = success_in_period || improved;
+        bool migrate = false;
+        if (migration.scheme == Scheme::A && improved) {
+            migrate = true;
+            stats.interval = next_interval(Scheme::A, stats.interval, true, cap);
+        } else if (gen - last_migration_gen >= stats.interval) {
+            migrate = true;
+            stats.interval = next_interval(migration.scheme, stats.interval, success_in_period, cap);
+        }
+        if (migrate) {
             send_migrant();
-            last_migration_gen = view.generation();
+            last_migration_gen = gen;
+            success_in_period = false;
         }
         pop();
         return !stop_requested;
@@ -231,7 +248,7 @@ Island::Island(int n_phys, Topology topology, MigrationPolicy migration, int max
     impl_->range_pop = std::move(range_pop);
     impl_->sent_to.assign(static_cast<size_t>(impl_->size), 0);
     impl_->received_from.assign(static_cast<size_t>(impl_->size), 0);
-    impl_->stats.interval = migration.interval;
+    impl_->stats.interval = migration.scheme == Scheme::Fixed ? migration.interval : 1;
 }
 
 Island::~Island() = default;

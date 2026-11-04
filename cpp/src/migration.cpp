@@ -1,11 +1,22 @@
 #include "qmap/migration.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace qmap {
 
+int next_interval(Scheme scheme, int tau, bool improved, int cap) {
+    if (scheme == Scheme::Fixed) return tau;
+    if (improved) return scheme == Scheme::A ? 1 : std::max(1, (tau + 1) / 2);
+    return tau > cap / 2 ? cap : tau * 2;
+}
+
 MigrationPolicy parse_migration(const std::string& s) {
     MigrationPolicy m;
+    if (s == "adaptiveA" || s == "adaptiveB") {
+        m.scheme = s == "adaptiveA" ? Scheme::A : Scheme::B;
+        return m;
+    }
     if (s.rfind("fixed:", 0) == 0) {
         size_t used = 0;
         const std::string num = s.substr(6);
@@ -20,7 +31,7 @@ MigrationPolicy parse_migration(const std::string& s) {
         m.interval = n;
         return m;
     }
-    throw std::invalid_argument("bad --migration '" + s + "' (expected fixed:N)");
+    throw std::invalid_argument("bad --migration '" + s + "' (expected fixed:N, adaptiveA or adaptiveB)");
 }
 
 Topology parse_topology(const std::string& s) {

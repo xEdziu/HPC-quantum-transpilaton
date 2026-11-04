@@ -23,7 +23,7 @@ namespace {
 const char* kUsage =
     "usage: qmap_ga --instance <qasm> --device <json> [--pop N] [--generations N] [--max-time S] [--target N]\n"
     "               [--seed N] [--tournament K] [--pc P] [--pm P] [--elite E] [--log <csv>]\n"
-    "               [--migration fixed:N] [--topology all|ring] [--out-qasm <path> --out-layout <path>]\n"
+    "               [--migration fixed:N|adaptiveA|adaptiveB] [--topology all|ring] [--out-qasm <path> --out-layout <path>]\n"
     "  --log may contain {rank}, replaced by the MPI rank.\n";
 
 int to_int(const std::string& a, const std::string& v) {
