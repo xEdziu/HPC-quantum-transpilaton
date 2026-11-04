@@ -1,0 +1,11 @@
+{
+  "comment": "Copy to cluster.json (gitignored) and replace HOST_A/B/C with real host names. The first host of every config runs rank 0 and must be the machine that executes run_all.ps1. pop values are placeholders: tune them per card so that one generation stays well under the Windows TDR limit (about 2 s by default) and the GPU is saturated.",
+  "repo_path": "E:\\mgr\\sem2\\HPC-quantum-transpilaton",
+  "exe": "build\\Release\\qmap_ga.exe",
+  "device": "data\\devices\\falcon27.json",
+  "hosts": [
+    {"name": "rtx5080", "host": "HOST_A", "pop": 1048576, "gpu": "RTX 5080"},
+    {"name": "rtx5070", "host": "HOST_B", "pop": 262144, "gpu": "RTX 5070 Laptop"},
+    {"name": "rtx3060", "host": "HOST_C", "pop": 131072, "gpu": "RTX 3060"}
+  ]
+}

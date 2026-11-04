@@ -16,6 +16,7 @@ Format: [MADR](https://adr.github.io/madr/), po polsku. Szablon: [0000-szablon.m
 | [0008](0008-migracja.md) | Asynchroniczna migracja najlepszego osobnika (all/ring, stały i adaptacyjny interwał) | Zaakceptowana |
 | [0009](0009-zakonczenie.md) | Protokół zakończenia bez gubienia komunikatów | Zaakceptowana |
 | [0010](0010-ttt.md) | Definicja Time-to-Target i poziomy celu | Zaakceptowana |
+| [0011](0011-narzedzia-profilowania.md) | Narzędzia profilowania: Nsight Systems, Nsight Compute, NVTX | Zaakceptowana |
 
 ## Jak dodać ADR
 
