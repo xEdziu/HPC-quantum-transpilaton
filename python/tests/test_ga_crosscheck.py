@@ -47,7 +47,9 @@ def test_ga_output_validates(name, tmp_path):
     assert report["valid"], report
     assert report["swaps"] == best
 
-    rows = list(csv.DictReader(csv_out.read_text(encoding="utf-8").splitlines()))
+    # qmap_ga writes one log per MPI rank: ga.csv -> ga_r0.csv
+    rank0_csv = csv_out.with_name("ga_r0.csv")
+    rows = list(csv.DictReader(rank0_csv.read_text(encoding="utf-8").splitlines()))
     assert len(rows) == 31
     bests = [int(r["best"]) for r in rows]
     assert all(a >= b for a, b in zip(bests, bests[1:]))

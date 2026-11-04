@@ -145,11 +145,11 @@ Test łączności (powinien wypisać nazwy obu komputerów):
 mpiexec -hosts 2 HOST_A 1 HOST_B 1 hostname
 ```
 
-Przykład MPMD z różnym `--pop` na każdym hoście (liczność populacji dobrana do karty; `{rank}` w `--log` daje osobny
-plik na rank, ale zapisywany na dysku danego hosta):
+Przykład MPMD z różnym `--pop` na każdym hoście (liczność populacji dobrana do karty; `--log results\run.csv` daje osobny plik `run_r<rank>.csv`
+na każdy rank, zapisywany na dysku danego hosta):
 
 ```powershell
-mpiexec -n 1 -host HOST_A build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 1000000 --target 20 --max-time 120 --migration adaptiveB --log results\run_r{rank}.csv --out-qasm results\best.qasm --out-layout results\best.json : -n 1 -host HOST_B build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 400000 --target 20 --max-time 120 --migration adaptiveB --log results\run_r{rank}.csv : -n 1 -host HOST_C build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 200000 --target 20 --max-time 120 --migration adaptiveB --log results\run_r{rank}.csv
+mpiexec -n 1 -host HOST_A build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 1000000 --target 20 --max-time 120 --migration adaptiveB --log results\run.csv --out-qasm results\best.qasm --out-layout results\best.json : -n 1 -host HOST_B build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 400000 --target 20 --max-time 120 --migration adaptiveB --log results\run.csv : -n 1 -host HOST_C build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 200000 --target 20 --max-time 120 --migration adaptiveB --log results\run.csv
 ```
 
 Uruchamiaj z katalogu repo (ścieżki względne `build\...`, `data\...` muszą istnieć u każdego hosta w tym samym

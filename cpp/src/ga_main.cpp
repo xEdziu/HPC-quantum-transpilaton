@@ -24,7 +24,7 @@ const char* kUsage =
     "usage: qmap_ga --instance <qasm> --device <json> [--pop N] [--generations N] [--max-time S] [--target N]\n"
     "               [--seed N] [--tournament K] [--pc P] [--pm P] [--elite E] [--log <csv>]\n"
     "               [--migration fixed:N|adaptiveA|adaptiveB] [--topology all|ring] [--out-qasm <path> --out-layout <path>]\n"
-    "  --log may contain {rank}, replaced by the MPI rank.\n";
+    "  --log writes one CSV per rank: results/run.csv -> results/run_r0.csv, results/run_r1.csv, ...\n";
 
 int to_int(const std::string& a, const std::string& v) {
     size_t used = 0;
@@ -48,11 +48,14 @@ uint64_t to_u64(const std::string& a, const std::string& v) {
     return x;
 }
 
-std::string with_rank(std::string path, int rank) {
-    const std::string tag = "{rank}";
-    for (size_t pos = path.find(tag); pos != std::string::npos; pos = path.find(tag, pos))
-        path.replace(pos, tag.size(), std::to_string(rank));
-    return path;
+// "dir/run.csv" -> "dir/run_r<rank>.csv" (suffix appended if there is no extension). No "{rank}"-style
+// placeholder on purpose: braces in unquoted arguments get mangled on the PowerShell/mpiexec command line.
+std::string with_rank(const std::string& path, int rank) {
+    const std::string suffix = "_r" + std::to_string(rank);
+    const size_t slash = path.find_last_of("/\\");
+    const size_t dot = path.find_last_of('.');
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) return path + suffix;
+    return path.substr(0, dot) + suffix + path.substr(dot);
 }
 
 }  // namespace
