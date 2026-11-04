@@ -49,15 +49,19 @@ Nie używamy `requirements.txt` ani samego `pip`.
 
 ## C++ (CMake)
 
-Na razie tylko host (C++17, bez CUDA); wymagany CMake >= 3.24 i kompilator MSVC. Generator Visual Studio
-jest wykrywany automatycznie, nlohmann_json pobierany przez `FetchContent`.
+Wymagany CMake >= 3.24, VS 2022 Build Tools (MSVC) i CUDA 12.9 (architektury sm_86 i sm_120).
+Generator trzeba wskazać jawnie (VS 2026 nie jest wspierany przez `nvcc`); nlohmann_json pobierany jest
+przez `FetchContent`. Biblioteka `qmap_core` jest tylko hostowa, kod CUDA (`qmap_gpu`) jest osobno.
 
 ```
-cmake -S cpp -B build
+cmake -S cpp -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
-build\Release\qmap_eval.exe --instance data\instances\qft_n8.qasm --device data\devices\falcon27.json
+build\Release\qmap_eval.exe --instance data\instances\qft_n8.qasm --device data\devicesalcon27.json
 ```
+
+Jeśli katalog `build` był skonfigurowany innym generatorem (np. VS 2026), usuń go przed konfiguracją.
+Test `qmap_gpu_tests` wymaga karty NVIDIA i porównuje fitness z GPU z routerem CPU.
 
 Test krzyżowy z walidatorem Pythona (`python/tests/test_router_crosscheck.py`) szuka
 `build/Release/qmap_eval.exe` albo zmiennej `QMAP_EVAL`; bez pliku jest pomijany.
