@@ -34,3 +34,18 @@ uv run python -m qmap.instances
 ```
 
 Nie używamy `requirements.txt` ani samego `pip`.
+
+## C++ (CMake)
+
+Na razie tylko host (C++17, bez CUDA); wymagany CMake >= 3.24 i kompilator MSVC. Generator Visual Studio
+jest wykrywany automatycznie, nlohmann_json pobierany przez `FetchContent`.
+
+```
+cmake -S cpp -B build
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+build\Release\qmap_eval.exe --instance data\instances\qft_n8.qasm --device data\devices\falcon27.json
+```
+
+Test krzyżowy z walidatorem Pythona (`python/tests/test_router_crosscheck.py`) szuka
+`build/Release/qmap_eval.exe` albo zmiennej `QMAP_EVAL`; bez pliku jest pomijany.
