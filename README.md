@@ -80,7 +80,8 @@ Wyjście `qmap_ga`: każdy rank drukuje `rank=<r> best=<SWAP> generations=<G> ev
 (`stop` to `target`, `max_generations`, `max_time` albo `remote_stop`), a rank 0 na końcu
 `global best=<SWAP> best_rank=<r> ttt_s=<T lub NA> evals=<E> time_s=<T>`.
 Opcje: `--pop`, `--generations`, `--max-time`, `--target`, `--seed`, `--tournament`, `--pc`, `--pm`, `--elite`,
-`--migration fixed:N|adaptiveA|adaptiveB` (domyślnie `fixed:100`), `--topology all|ring` (domyślnie `all`).
+`--migration fixed:N|adaptiveA|adaptiveB` (domyślnie `fixed:100`), `--topology all|ring` (domyślnie `all`),
+`--summary <json>` (rank 0 zapisuje wynik globalny i parametry przebiegu: `best`, `best_rank`, `ttt_s` lub `null`, `evals`, `time_s`, `rank0_stop`, `instance`, `pop`, `seed`, `target`, `migration`, `topology`, `n_ranks`).
 `qmap_ga` zawsze działa pod MPI (bez `mpiexec` jako pojedyncza wyspa); `--log` zapisuje osobny plik na każdą
 rangę (`results\run.csv` → `results\run_r0.csv`, `results\run_r1.csv`, …), a `--out-qasm` / `--out-layout` zapisuje tylko rank 0 (globalnie najlepszy wynik).
 
@@ -94,3 +95,21 @@ mpiexec -n 2 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --
 
 Test `qmap_mpi_tests` (3 rangi, CPU, bez GPU) uruchamia `ctest`. Konfiguracja klastra z trzech komputerów:
 [docs/instalacja-windows.md](docs/instalacja-windows.md), Krok 7.
+
+## Eksperymenty
+
+Pełny protokół (parametry, zagrożenia dla ważności): [docs/protokol-eksperymentow.md](docs/protokol-eksperymentow.md);
+profilowanie: [docs/profilowanie.md](docs/profilowanie.md). Sekwencja poleceń (z komputera rank 0; `data\cluster.json`
+tworzymy z `data\cluster.example.json`):
+
+```powershell
+uv run python -m qmap.baseline                                  # SABRE -> results\baseline\sabre.csv
+uv run python -m qmap.experiments plan --cluster data\cluster.json --instances qft_n12 --configs rtx5080+rtx5070+rtx3060 --target -1 --reps 3 --max-time 300 --out results/pilot --script pilot.ps1
+.\pilot.ps1                                                     # pilotaż (długie przebiegi bez celu)
+uv run python -m qmap.experiments pilot --runs results/pilot    # B i cele -> results\pilot\targets.csv
+uv run python -m qmap.experiments plan --cluster data\cluster.json --targets-from results/pilot/targets.csv --reps 10 --max-time 120
+.\run_all.ps1                                                   # wznawialny; summary.json w katalogu każdego przebiegu
+uv run python -m qmap.experiments validate-runs --runs results/runs
+uv run python -m qmap.experiments aggregate                     # results\aggregate.csv, results\quality.csv
+uv run python -m qmap.experiments plot                          # results\plots\*.png
+```

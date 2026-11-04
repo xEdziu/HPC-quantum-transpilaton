@@ -36,6 +36,19 @@ Naiwna wersja bazowa algorytmu genetycznego (`qmap::run_ga`, plik wykonywalny `q
   `fitness_h2d`, `fitness_kernel`, `fitness_d2h`. Operatory hosta nie mają własnych zakresów.
 - Pomiary (commit, parametry GA, sprzęt): _do uzupełnienia_.
 
+### Obserwacje wstępne (nie pomiar)
+
+Z jednego testu dymnego (`qft_n12`, `--pop 4096`, RTX 5080, 2 rangi współdzielące jedną kartę, logi CSV); nie są
+wynikiem eksperymentu i **wymagają potwierdzenia profilem** ([profilowanie.md](profilowanie.md)):
+
+- **Wydajność:** średnio na generację czas oceny (`eval_time_s`) ≈ 0,35 ms, a operatory GA na hoście (`ops_time_s`)
+  ≈ 0,68 ms. Przy małej populacji dominują operatory hosta, nie GPU. Przed jakąkolwiek zmianą: `nsys` (zakresy
+  NVTX operatorów trzeba dodać) oraz sprawdzenie przy większym `--pop`.
+- **Jakość:** dla `qft_n12` GA v1 osiąga najlepszy wynik 150 SWAP po ok. 1 s (ok. 1000 generacji), po czym
+  stagnuje; SABRE (minimum po ziarnach) daje 51 SWAP. Wniosek wstępny: zachłanny router v1 jest naiwny, a populacja
+  zbiega przedwcześnie (utrata różnorodności). Kandydaci: lookahead w routerze (poniżej) oraz zachowanie różnorodności /
+  restart przy stagnacji.
+
 ## MPI v1 (wyspy, migracja asynchroniczna)
 
 Naiwna wersja bazowa warstwy MPI (`qmap_mpi`, `qmap_ga` zawsze pod MPI; bez `mpiexec` działa jako pojedyncza wyspa).
@@ -69,6 +82,8 @@ Kandydaci specyficzni dla MPI (nie zaimplementowani; do sprawdzenia po profilowa
 w kolejności wynikającej z wyników, a nie z tej listy.
 
 - Lookahead w routerze (uwzględnienie kilku kolejnych bramek 2q przy wyborze SWAP) – mniej SWAP, droższy fitness.
+- Zachowanie różnorodności populacji i restart przy stagnacji (np. restart wyspy po N generacjach bez poprawy,
+  niszowanie, większa mutacja przy stagnacji) – przeciw przedwczesnej zbieżności.
 - Pomijanie kolejnych identycznych par CX (powtórzona para, już sąsiednia, nie wymaga ponownego sprawdzania).
 - Lista par `pairs` w pamięci `__constant__` (odczyt jednakowy dla wszystkich wątków – broadcast).
 - Tabele `dist` / `next_hop` w pamięci współdzielonej (stagowane raz na blok).
