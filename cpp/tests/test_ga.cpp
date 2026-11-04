@@ -168,6 +168,66 @@ static void test_target_stop() {
     CHECK(r.evals == params.pop_size);
 }
 
+static void test_island_hook() {
+    const CpuProblem p = load_problem("qft_n8");
+    const int n = p.dev.n_phys;
+    GaParams params;
+    params.pop_size = 32;
+    params.max_generations = 50;
+    params.max_time_s = 600;
+    params.seed = 7;
+
+    std::vector<uint8_t> migrant(static_cast<size_t>(n));
+    std::iota(migrant.begin(), migrant.end(), uint8_t{0});
+
+    // The immigrant (fake fitness 0) becomes best-so-far, is the elite of the next generation, and
+    // the target check then runs on best-so-far.
+    {
+        const Evaluator base = cpu_evaluator(p);
+        std::vector<std::vector<uint8_t>> first_rows;
+        const Evaluator spy = [&](const uint8_t* pop, int pop_size, int* out) {
+            first_rows.emplace_back(pop, pop + n);
+            base(pop, pop_size, out);
+        };
+        params.target = -1;
+        const GaResult r = run_ga(params, n, spy, {}, [&](IslandView& v) {
+            CHECK(v.best_fitness() >= 0);
+            if (v.generation() == 2) v.immigrate(migrant.data(), 0);
+            return v.generation() < 4;
+        });
+        CHECK(r.stop_reason == "external");
+        CHECK(r.generations == 4);
+        CHECK(r.best_fitness == 0);
+        CHECK(r.best == migrant);
+        CHECK(first_rows.size() == 5);
+        CHECK(first_rows[3] == migrant);  // generation 3: elite 0 is the immigrant
+    }
+    {
+        params.target = 0;
+        const GaResult r = run_ga(params, n, cpu_evaluator(p), {}, [&](IslandView& v) {
+            if (v.generation() == 2) v.immigrate(migrant.data(), 0);
+            return true;
+        });
+        CHECK(r.stop_reason == "target");
+        CHECK(r.generations == 2);
+        CHECK(r.ttt_s >= 0);
+    }
+    {
+        params.target = -1;
+        int best_before = -1;
+        const GaResult r = run_ga(params, n, cpu_evaluator(p), {}, [&](IslandView& v) {
+            if (v.generation() == 3) {
+                best_before = v.best_fitness();
+                v.immigrate(migrant.data(), 1000000);  // worse than everything: best-so-far unchanged
+            }
+            return v.generation() < 3;
+        });
+        CHECK(r.stop_reason == "external");
+        CHECK(r.best_fitness <= best_before);
+        CHECK(r.best_fitness < 1000000);
+    }
+}
+
 int main() {
     const struct {
         const char* name;
@@ -177,7 +237,8 @@ int main() {
                  {"tournament", test_tournament},
                  {"run_ga_qft_n8", [] { test_run_ga("qft_n8"); }},
                  {"run_ga_falcon27_qaoa_n12", [] { test_run_ga("qaoa_n12"); }},
-                 {"target_stop", test_target_stop}};
+                 {"target_stop", test_target_stop},
+                 {"island_hook", test_island_hook}};
     for (const auto& c : cases) {
         const int before = g_failures;
         try {

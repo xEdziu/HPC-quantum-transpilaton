@@ -58,7 +58,20 @@ void swap_mutation(uint8_t* genes, int n, std::mt19937_64& rng) {
     std::swap(genes[i], genes[j]);
 }
 
-GaResult run_ga(const GaParams& p, int n_phys, const Evaluator& evaluate, const GenerationLog& on_generation) {
+void IslandView::immigrate(const uint8_t* genes, int fitness) {
+    size_t worst = 0;
+    for (size_t i = 1; i < pop_n_; ++i)
+        if (fit_[i] > fit_[worst]) worst = i;
+    std::copy_n(genes, n_, pop_ + worst * static_cast<size_t>(n_));
+    fit_[worst] = fitness;
+    if (fitness < res_->best_fitness) {
+        res_->best_fitness = fitness;
+        res_->best.assign(genes, genes + n_);
+    }
+}
+
+GaResult run_ga(const GaParams& p, int n_phys, const Evaluator& evaluate, const GenerationLog& on_generation,
+                const IslandHook& hook) {
     if (n_phys < 2 || n_phys > 255) throw std::invalid_argument("n_phys must be in [2, 255]");
     if (p.pop_size < 2) throw std::invalid_argument("pop_size must be >= 2");
     if (p.elite < 0 || p.elite > p.pop_size) throw std::invalid_argument("elite must be in [0, pop_size]");
@@ -137,9 +150,18 @@ GaResult run_ga(const GaParams& p, int n_phys, const Evaluator& evaluate, const 
         res.generations = gen;
         res.evals = evals;
         res.total_time_s = s.elapsed_s;
+        bool keep_going = true;
+        if (hook) {
+            IslandView view(gen, n_phys, pop.data(), fit.data(), pop_n, best_i, &res);
+            keep_going = hook(view);
+        }
         if (p.target >= 0 && res.best_fitness <= p.target) {
             res.ttt_s = s.elapsed_s;
             res.stop_reason = "target";
+            break;
+        }
+        if (!keep_going) {
+            res.stop_reason = "external";
             break;
         }
         if (gen >= p.max_generations) {
