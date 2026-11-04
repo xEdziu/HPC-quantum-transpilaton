@@ -18,6 +18,8 @@ endif()
 add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
 
 find_package(CUDAToolkit REQUIRED)
+# MS-MPI (SDK via MSMPI_INC / MSMPI_LIB64); used only by qmap_mpi.
+find_package(MPI REQUIRED COMPONENTS CXX)
 
 include(FetchContent)
 FetchContent_Declare(
