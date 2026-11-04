@@ -76,5 +76,21 @@ build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\d
 uv run python -m qmap.validate --instance qft_n12 --routed results\qft_n12_routed.qasm --layout results\qft_n12_layout.json
 ```
 
-Ostatnia linia wyjścia `qmap_ga`: `best=<SWAP> generations=<G> evals=<E> time_s=<T> ttt_s=<T lub NA> stop=<powód>`.
-Opcje: `--pop`, `--generations`, `--max-time`, `--target`, `--seed`, `--tournament`, `--pc`, `--pm`, `--elite`.
+Wyjście `qmap_ga`: każdy rank drukuje `rank=<r> best=<SWAP> generations=<G> evals=<E> time_s=<T> ttt_s=<T lub NA> stop=<powód> migrants_sent=<N> migrants_received=<N>`
+(`stop` to `target`, `max_generations`, `max_time` albo `remote_stop`), a rank 0 na końcu
+`global best=<SWAP> best_rank=<r> ttt_s=<T lub NA> evals=<E> time_s=<T>`.
+Opcje: `--pop`, `--generations`, `--max-time`, `--target`, `--seed`, `--tournament`, `--pc`, `--pm`, `--elite`,
+`--migration fixed:N|adaptiveA|adaptiveB` (domyślnie `fixed:100`), `--topology all|ring` (domyślnie `all`).
+`qmap_ga` zawsze działa pod MPI (bez `mpiexec` jako pojedyncza wyspa); `{rank}` w `--log` jest zastępowane numerem
+rangi, a `--out-qasm` / `--out-layout` zapisuje tylko rank 0 (globalnie najlepszy wynik).
+
+## Uruchomienie wielu wysp (MPI)
+
+Test dymny na jednym komputerze (dwie wyspy dzielą kartę); `<T>` to dowolny osiągalny cel:
+
+```
+mpiexec -n 2 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 4096 --max-time 30 --target <T> --log results\smoke_r{rank}.csv
+```
+
+Test `qmap_mpi_tests` (3 rangi, CPU, bez GPU) uruchamia `ctest`. Konfiguracja klastra z trzech komputerów:
+[docs/instalacja-windows.md](docs/instalacja-windows.md), Krok 7.

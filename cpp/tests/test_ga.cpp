@@ -5,11 +5,13 @@
 #include <filesystem>
 #include <numeric>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "qmap/device.hpp"
 #include "qmap/ga.hpp"
+#include "qmap/migration.hpp"
 #include "qmap/qasm_io.hpp"
 #include "qmap/router.hpp"
 
@@ -168,6 +170,95 @@ static void test_target_stop() {
     CHECK(r.evals == params.pop_size);
 }
 
+static void test_island_hook() {
+    const CpuProblem p = load_problem("qft_n8");
+    const int n = p.dev.n_phys;
+    GaParams params;
+    params.pop_size = 32;
+    params.max_generations = 50;
+    params.max_time_s = 600;
+    params.seed = 7;
+
+    std::vector<uint8_t> migrant(static_cast<size_t>(n));
+    std::iota(migrant.begin(), migrant.end(), uint8_t{0});
+
+    // The immigrant (fake fitness 0) becomes best-so-far, is the elite of the next generation, and
+    // the target check then runs on best-so-far.
+    {
+        const Evaluator base = cpu_evaluator(p);
+        std::vector<std::vector<uint8_t>> first_rows;
+        const Evaluator spy = [&](const uint8_t* pop, int pop_size, int* out) {
+            first_rows.emplace_back(pop, pop + n);
+            base(pop, pop_size, out);
+        };
+        params.target = -1;
+        const GaResult r = run_ga(params, n, spy, {}, [&](IslandView& v) {
+            CHECK(v.best_fitness() >= 0);
+            if (v.generation() == 2) v.immigrate(migrant.data(), 0);
+            return v.generation() < 4;
+        });
+        CHECK(r.stop_reason == "external");
+        CHECK(r.generations == 4);
+        CHECK(r.best_fitness == 0);
+        CHECK(r.best == migrant);
+        CHECK(first_rows.size() == 5);
+        CHECK(first_rows[3] == migrant);  // generation 3: elite 0 is the immigrant
+    }
+    {
+        params.target = 0;
+        const GaResult r = run_ga(params, n, cpu_evaluator(p), {}, [&](IslandView& v) {
+            if (v.generation() == 2) v.immigrate(migrant.data(), 0);
+            return true;
+        });
+        CHECK(r.stop_reason == "target");
+        CHECK(r.generations == 2);
+        CHECK(r.ttt_s >= 0);
+    }
+    {
+        params.target = -1;
+        int best_before = -1;
+        const GaResult r = run_ga(params, n, cpu_evaluator(p), {}, [&](IslandView& v) {
+            if (v.generation() == 3) {
+                best_before = v.best_fitness();
+                v.immigrate(migrant.data(), 1000000);  // worse than everything: best-so-far unchanged
+            }
+            return v.generation() < 3;
+        });
+        CHECK(r.stop_reason == "external");
+        CHECK(r.best_fitness <= best_before);
+        CHECK(r.best_fitness < 1000000);
+    }
+}
+
+static void test_next_interval() {
+    CHECK(next_interval(Scheme::A, 8, true, 1000) == 1);    // A: improvement resets to 1
+    CHECK(next_interval(Scheme::A, 1, false, 1000) == 2);   // A: no improvement doubles
+    CHECK(next_interval(Scheme::A, 8, false, 1000) == 16);
+    CHECK(next_interval(Scheme::B, 8, true, 1000) == 4);    // B: improvement halves ...
+    CHECK(next_interval(Scheme::B, 5, true, 1000) == 3);    // ... rounding up
+    CHECK(next_interval(Scheme::B, 1, true, 1000) == 1);    // ... but never below 1
+    CHECK(next_interval(Scheme::B, 4, false, 1000) == 8);   // B: no improvement doubles
+    CHECK(next_interval(Scheme::Fixed, 7, true, 1000) == 7);
+    CHECK(next_interval(Scheme::Fixed, 7, false, 1000) == 7);
+    CHECK(next_interval(Scheme::A, 600, false, 1000) == 1000);  // capped at max_generations
+    CHECK(next_interval(Scheme::B, 1000, false, 1000) == 1000);
+    CHECK(next_interval(Scheme::B, 1 << 30, false, 1 << 30) == (1 << 30));  // no overflow
+
+    CHECK(parse_migration("fixed:5").scheme == Scheme::Fixed && parse_migration("fixed:5").interval == 5);
+    CHECK(parse_migration("adaptiveA").scheme == Scheme::A);
+    CHECK(parse_migration("adaptiveB").scheme == Scheme::B);
+    int bad = 0;
+    for (const char* s : {"fixed:0", "fixed:", "fixed:x", "adaptiveC", "", "5"}) {
+        try {
+            parse_migration(s);
+        } catch (const std::invalid_argument&) {
+            ++bad;
+        }
+    }
+    CHECK(bad == 6);
+    CHECK(parse_topology("all") == Topology::All && parse_topology("ring") == Topology::Ring);
+}
+
 int main() {
     const struct {
         const char* name;
@@ -177,7 +268,9 @@ int main() {
                  {"tournament", test_tournament},
                  {"run_ga_qft_n8", [] { test_run_ga("qft_n8"); }},
                  {"run_ga_falcon27_qaoa_n12", [] { test_run_ga("qaoa_n12"); }},
-                 {"target_stop", test_target_stop}};
+                 {"target_stop", test_target_stop},
+                 {"island_hook", test_island_hook},
+                 {"next_interval", test_next_interval}};
     for (const auto& c : cases) {
         const int before = g_failures;
         try {

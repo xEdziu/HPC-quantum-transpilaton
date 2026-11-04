@@ -58,14 +58,42 @@ struct GaResult {
     long long evals = 0;
     double total_time_s = 0;
     double ttt_s = -1;        // elapsed time when best <= target first happened, < 0 if never
-    std::string stop_reason;  // "target", "max_generations" or "max_time"
+    std::string stop_reason;  // "target", "max_generations", "max_time" or "external" (hook asked to stop)
 };
+
+// What an island hook may see and do once per generation (after evaluation, stats and the
+// on_generation callback, before the stop checks). Constructed by run_ga only.
+class IslandView {
+public:
+    IslandView(int generation, int n_phys, uint8_t* pop, int* fit, size_t pop_n, size_t best_index, GaResult* res)
+        : generation_(generation), n_(n_phys), pop_(pop), fit_(fit), pop_n_(pop_n), best_index_(best_index), res_(res) {}
+
+    int generation() const { return generation_; }
+    // Best fitness of the population as evaluated this generation and a pointer to its n_phys genes.
+    int best_fitness() const { return fit_[best_index_]; }
+    const uint8_t* best_genes() const { return pop_ + best_index_ * static_cast<size_t>(n_); }
+
+    // Overwrites the current worst individual (genes and fitness) in place. If it beats the run's
+    // best-so-far, that is updated too. Several immigrants in one call may overwrite each other.
+    void immigrate(const uint8_t* genes, int fitness);
+
+private:
+    int generation_, n_;
+    uint8_t* pop_;
+    int* fit_;
+    size_t pop_n_, best_index_;
+    GaResult* res_;
+};
+
+// Returns false to stop the run (stop_reason "external", unless the target was reached).
+using IslandHook = std::function<bool(IslandView&)>;
 
 // pop: pop_size * n_phys genes, out: pop_size fitness values.
 using Evaluator = std::function<void(const uint8_t* pop, int pop_size, int* out)>;
 using GenerationLog = std::function<void(const GenerationStats&)>;
 
 // Throws std::invalid_argument on bad parameters.
-GaResult run_ga(const GaParams& params, int n_phys, const Evaluator& evaluate, const GenerationLog& on_generation);
+GaResult run_ga(const GaParams& params, int n_phys, const Evaluator& evaluate, const GenerationLog& on_generation,
+                const IslandHook& hook = {});
 
 }  // namespace qmap
