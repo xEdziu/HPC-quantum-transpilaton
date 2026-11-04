@@ -23,3 +23,9 @@ target_link_libraries(qmap_core PUBLIC nlohmann_json::nlohmann_json)
 
 add_executable(qmap_eval src/eval_main.cpp)
 target_link_libraries(qmap_eval PRIVATE qmap_core)
+
+enable_testing()
+add_executable(qmap_tests tests/test_main.cpp)
+target_link_libraries(qmap_tests PRIVATE qmap_core)
+target_compile_definitions(qmap_tests PRIVATE QMAP_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data")
+add_test(NAME qmap_tests COMMAND qmap_tests)
