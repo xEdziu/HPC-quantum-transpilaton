@@ -197,6 +197,13 @@ struct Island::Impl {
         MPI_Reduce(&local.evals, &evals, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
         MPI_Reduce(&local.total_time_s, &time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
         g.ttt_s = ttt < no_ttt ? ttt : -1;
+        // Every rank must pass the same number of targets (same command line apart from --pop).
+        std::vector<double> mine_by_target(local.ttt_by_target.size()), min_by_target(local.ttt_by_target.size());
+        for (size_t i = 0; i < mine_by_target.size(); ++i)
+            mine_by_target[i] = local.ttt_by_target[i] >= 0 ? local.ttt_by_target[i] : no_ttt;
+        MPI_Reduce(mine_by_target.data(), min_by_target.data(), static_cast<int>(mine_by_target.size()), MPI_DOUBLE,
+                   MPI_MIN, 0, MPI_COMM_WORLD);
+        for (const double v : min_by_target) g.ttt_by_target.push_back(v < no_ttt ? v : -1);
         g.evals = evals;
         g.time_s = time;
         pop();

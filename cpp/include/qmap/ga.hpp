@@ -33,6 +33,9 @@ struct GaParams {
     int max_generations = 1000;
     double max_time_s = 60.0;
     int target = -1;  // stop when best <= target; < 0 = no target
+    // Optional extra thresholds timed in the same run (GaResult::ttt_by_target); does not affect stopping.
+    // The caller sets target = min(targets) to stop on the strictest one.
+    std::vector<int> targets;
     uint64_t seed = 0;
     int tournament_k = 3;
     double p_crossover = 0.9;
@@ -58,6 +61,7 @@ struct GaResult {
     long long evals = 0;
     double total_time_s = 0;
     double ttt_s = -1;        // elapsed time when best <= target first happened, < 0 if never
+    std::vector<double> ttt_by_target;  // per GaParams::targets entry: same clock as ttt_s, < 0 if never
     std::string stop_reason;  // "target", "max_generations", "max_time" or "external" (hook asked to stop)
 };
 

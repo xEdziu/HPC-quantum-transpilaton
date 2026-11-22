@@ -1,5 +1,6 @@
 // qmap_ga: island GA over initial layouts, fitness evaluated on the GPU, islands connected by MPI
 // (one rank = one island; also runs as a single island without mpiexec).
+#include <algorithm>
 #include <cstdio>
 #include <exception>
 #include <fstream>
@@ -22,12 +23,14 @@
 namespace {
 
 const char* kUsage =
-    "usage: qmap_ga --instance <qasm> --device <json> [--pop N] [--generations N] [--max-time S] [--target N]\n"
+    "usage: qmap_ga --instance <qasm> --device <json> [--pop N] [--generations N] [--max-time S] [--target N[,N...]]\n"
     "               [--seed N] [--tournament K] [--pc P] [--pm P] [--elite E] [--log <csv>]\n"
     "               [--migration fixed:N|adaptiveA|adaptiveB] [--topology all|ring] [--out-qasm <path> --out-layout <path>]\n"
     "               [--summary <json>]\n"
     "  --log writes one CSV per rank: results/run.csv -> results/run_r0.csv, results/run_r1.csv, ...\n"
-    "  --summary: rank 0 writes the global result and run parameters as JSON\n";
+    "  --summary: rank 0 writes the global result and run parameters as JSON\n"
+    "  --target: one value, or a comma-separated list (e.g. 172,164,161): the run stops at the smallest and\n"
+    "            records the time to each; -1 = no target. Every rank must get the same list.\n";
 
 int to_int(const std::string& a, const std::string& v) {
     size_t used = 0;
@@ -49,6 +52,34 @@ uint64_t to_u64(const std::string& a, const std::string& v) {
     const uint64_t x = std::stoull(v, &used);
     if (used != v.size()) throw std::invalid_argument("bad seed for " + a + ": '" + v + "'");
     return x;
+}
+
+// "172,164,161" -> {172, 164, 161}; a single negative value means "no target" (empty list).
+std::vector<int> to_targets(const std::string& a, const std::string& v) {
+    std::vector<int> out;
+    size_t pos = 0;
+    for (;;) {
+        const size_t comma = v.find(',', pos);
+        const int t = to_int(a, v.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos));
+        if (std::find(out.begin(), out.end(), t) == out.end()) out.push_back(t);
+        if (comma == std::string::npos) break;
+        pos = comma + 1;
+    }
+    if (out.size() == 1 && out[0] < 0) out.clear();
+    for (const int t : out)
+        if (t < 0) throw std::invalid_argument("negative target in list for " + a + ": '" + v + "'");
+    return out;
+}
+
+// "172:1.230000,164:NA"
+std::string format_ttt_by_target(const std::vector<int>& targets, const std::vector<double>& ttt) {
+    std::string s;
+    for (size_t i = 0; i < targets.size(); ++i) {
+        char t[32] = "NA";
+        if (ttt[i] >= 0) std::snprintf(t, sizeof t, "%.6f", ttt[i]);
+        s += (i ? "," : "") + std::to_string(targets[i]) + ":" + t;
+    }
+    return s;
 }
 
 // "dir/run.csv" -> "dir/run_r<rank>.csv" (suffix appended if there is no extension). No "{rank}"-style
@@ -81,7 +112,11 @@ int main(int argc, char** argv) {
             else if (a == "--pop") params.pop_size = to_int(a, v);
             else if (a == "--generations") params.max_generations = to_int(a, v);
             else if (a == "--max-time") params.max_time_s = to_double(a, v);
-            else if (a == "--target") params.target = to_int(a, v);
+            else if (a == "--target") {
+                params.targets = to_targets(a, v);
+                params.target =
+                    params.targets.empty() ? -1 : *std::min_element(params.targets.begin(), params.targets.end());
+            }
             else if (a == "--seed") { params.seed = to_u64(a, v); seed_arg = params.seed; }
             else if (a == "--tournament") params.tournament_k = to_int(a, v);
             else if (a == "--pc") params.p_crossover = to_double(a, v);
@@ -170,8 +205,11 @@ int main(int argc, char** argv) {
             qmap::write_routed(dev, routed, out_qasm, out_layout);
             char gttt[32] = "NA";
             if (global.ttt_s >= 0) std::snprintf(gttt, sizeof gttt, "%.6f", global.ttt_s);
-            std::printf("global best=%d best_rank=%d ttt_s=%s evals=%lld time_s=%.6f\n", global.best_fitness,
-                        global.best_rank, gttt, global.evals, global.time_s);
+            std::string by_target;
+            if (!params.targets.empty())
+                by_target = " ttt_by_target=" + format_ttt_by_target(params.targets, global.ttt_by_target);
+            std::printf("global best=%d best_rank=%d ttt_s=%s evals=%lld time_s=%.6f%s\n", global.best_fitness,
+                        global.best_rank, gttt, global.evals, global.time_s, by_target.c_str());
 
             if (!summary_path.empty()) {
                 nlohmann::json j;
@@ -184,7 +222,14 @@ int main(int argc, char** argv) {
                 j["instance"] = instance;
                 j["pop"] = params.pop_size;  // rank 0 only
                 j["seed"] = seed_arg;
-                j["target"] = params.target;
+                j["target"] = params.target;  // the stopping (smallest) target
+                j["targets"] = params.targets;
+                nlohmann::json ttt_map = nlohmann::json::object();
+                for (size_t i = 0; i < params.targets.size(); ++i)
+                    ttt_map[std::to_string(params.targets[i])] = global.ttt_by_target[i] >= 0
+                                                                       ? nlohmann::json(global.ttt_by_target[i])
+                                                                       : nlohmann::json(nullptr);
+                j["ttt_by_target"] = ttt_map;
                 j["migration"] = migration_arg;
                 j["topology"] = topology_arg;
                 j["n_ranks"] = mpi.size();

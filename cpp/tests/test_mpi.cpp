@@ -142,13 +142,16 @@ static void test_fixed_all(const CpuProblem& p) {
 static void test_remote_stop(const CpuProblem& p) {
     GaParams params = base_params();
     params.max_generations = 100000;
-    if (g_rank == 0) params.target = 1000000;
+    params.targets = {1000000, 999999};  // same list on every rank; only rank 0 stops on it
+    if (g_rank == 0) params.target = 999999;
     MigrationPolicy fixed;
     fixed.interval = 5;
     const Outcome o = run_island(p, params, Topology::All, fixed);
     if (g_rank == 0) {
         CHECK(o.local.stop_reason == "target");
         CHECK(o.global.ttt_s >= 0);
+        CHECK(o.global.ttt_by_target.size() == 2);
+        CHECK(o.global.ttt_by_target[0] >= 0 && o.global.ttt_by_target[0] <= o.global.ttt_by_target[1]);
     } else {
         CHECK(o.local.stop_reason == "remote_stop");
         CHECK(o.local.generations < 100000);

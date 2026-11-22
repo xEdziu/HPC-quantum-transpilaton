@@ -93,6 +93,7 @@ GaResult run_ga(const GaParams& p, int n_phys, const Evaluator& evaluate, const 
 
     GaResult res;
     res.best_fitness = -1;
+    res.ttt_by_target.assign(p.targets.size(), -1.0);
     long long evals = 0;
 
     for (int gen = 0;; ++gen) {
@@ -155,6 +156,8 @@ GaResult run_ga(const GaParams& p, int n_phys, const Evaluator& evaluate, const 
             IslandView view(gen, n_phys, pop.data(), fit.data(), pop_n, best_i, &res);
             keep_going = hook(view);
         }
+        for (size_t i = 0; i < p.targets.size(); ++i)  // best-so-far, immigrants included (as for ttt_s)
+            if (res.ttt_by_target[i] < 0 && res.best_fitness <= p.targets[i]) res.ttt_by_target[i] = s.elapsed_s;
         if (p.target >= 0 && res.best_fitness <= p.target) {
             res.ttt_s = s.elapsed_s;
             res.stop_reason = "target";

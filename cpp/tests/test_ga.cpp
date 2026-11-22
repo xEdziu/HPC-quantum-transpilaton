@@ -170,6 +170,35 @@ static void test_target_stop() {
     CHECK(r.evals == params.pop_size);
 }
 
+// One run timed against several thresholds: looser targets are hit no later than stricter ones.
+static void test_ttt_by_target() {
+    const CpuProblem p = load_problem("qft_n8");
+    GaParams params;
+    params.pop_size = 64;
+    params.max_generations = 30;
+    params.max_time_s = 600;
+    params.seed = 7;
+    const GaResult ref = run_ga(params, p.dev.n_phys, cpu_evaluator(p), {});  // no targets
+    CHECK(ref.ttt_by_target.empty());
+    CHECK(ref.best_fitness >= 1);
+
+    params.targets = {1000000, ref.best_fitness, ref.best_fitness - 1};  // always, reached by the end, never
+    const GaResult r = run_ga(params, p.dev.n_phys, cpu_evaluator(p), {});
+    CHECK(r.stop_reason == "max_generations");
+    CHECK(r.ttt_by_target.size() == 3);
+    CHECK(r.ttt_by_target[0] >= 0);
+    CHECK(r.ttt_by_target[1] >= r.ttt_by_target[0]);
+    CHECK(r.ttt_by_target[2] < 0);
+
+    // Stopping on the strictest target: ttt_s is the time of that target.
+    params.targets = {1000000, ref.best_fitness};
+    params.target = ref.best_fitness;
+    const GaResult s = run_ga(params, p.dev.n_phys, cpu_evaluator(p), {});
+    CHECK(s.stop_reason == "target");
+    CHECK(s.ttt_s >= 0 && s.ttt_s == s.ttt_by_target[1]);
+    CHECK(s.ttt_by_target[0] >= 0 && s.ttt_by_target[0] <= s.ttt_by_target[1]);
+}
+
 static void test_island_hook() {
     const CpuProblem p = load_problem("qft_n8");
     const int n = p.dev.n_phys;
@@ -269,6 +298,7 @@ int main() {
                  {"run_ga_qft_n8", [] { test_run_ga("qft_n8"); }},
                  {"run_ga_falcon27_qaoa_n12", [] { test_run_ga("qaoa_n12"); }},
                  {"target_stop", test_target_stop},
+                 {"ttt_by_target", test_ttt_by_target},
                  {"island_hook", test_island_hook},
                  {"next_interval", test_next_interval}};
     for (const auto& c : cases) {
