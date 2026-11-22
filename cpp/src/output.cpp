@@ -1,6 +1,6 @@
 #include "qmap/output.hpp"
 
-#include <fstream>
+#include <filesystem>
 #include <stdexcept>
 
 #include <nlohmann/json.hpp>
@@ -9,10 +9,18 @@
 
 namespace qmap {
 
-namespace {
-void write_file(const std::string& path, const std::string& text) {
+std::ofstream open_output(const std::string& path) {
+    const std::filesystem::path parent = std::filesystem::path(path).parent_path();
+    std::error_code ec;
+    if (!parent.empty()) std::filesystem::create_directories(parent, ec);  // failure surfaces on open below
     std::ofstream f(path, std::ios::binary);  // binary: keep "\n" line endings on Windows
     if (!f) throw std::runtime_error("cannot write " + path);
+    return f;
+}
+
+namespace {
+void write_file(const std::string& path, const std::string& text) {
+    std::ofstream f = open_output(path);
     f << text;
 }
 }  // namespace
