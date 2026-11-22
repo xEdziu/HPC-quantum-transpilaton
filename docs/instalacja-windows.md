@@ -109,55 +109,91 @@ Bez tego `ncu` na kartach GeForce zgłasza `ERR_NVGPUCTRPERM`.
 
 ## Krok 7. Klaster MPI (kilka komputerów)
 
-> **Do zweryfikowania przez zespół na prawdziwej sieci LAN.** Poniższa procedura jest przygotowana na podstawie
-> dokumentacji MS-MPI i nie była jeszcze przetestowana na trzech komputerach.
+Procedura sprawdzona 2026-11-22 na naszych trzech komputerach (grupa robocza Windows, bez domeny):
 
-Na każdym hoście (komputery `HOST_A`, `HOST_B`, `HOST_C`; sieć LAN ustawiona jako **prywatna**):
+| Węzeł | Host | IP |
+|---|---|---|
+| RTX 5080 (rank 0, uruchamia `mpiexec`) | AMG-NORTH | 192.168.66.61 |
+| RTX 3060 | PS04 | 192.168.66.2 |
+| RTX 5070 Laptop | HyperX_Zuber | 192.168.66.169 (kabel) |
 
-1. **Ta sama ścieżka do repozytorium i zbudowanego pliku wykonywalnego** na każdym hoście, np.
-   `E:\mgr\sem2\HPC-quantum-transpilaton\build\Release\qmap_ga.exe` (ten sam układ katalogów, w tym `data\`).
-   Zbuduj projekt (Krok 5) na każdym komputerze osobno albo skopiuj `build\Release` i `data`; wersje muszą być
-   identyczne.
-2. **Usługa `smpd`.** Albo usługa MS-MPI Launch Service (`msmpilaunchsvc`, instalowana z MS-MPI; sprawdź w
-   `services.msc`, że działa), albo ręcznie w osobnym oknie PowerShell na każdym hoście:
+W naszej sieci **nazwy hostów nie są rozwiązywane**, więc wszędzie używamy adresów IP. Konfiguracja dla
+`qmap.experiments plan`: [`data/cluster.example.json`](../data/cluster.example.json).
+
+Na **każdym** komputerze:
+
+1. **Sieć prywatna, kabel.** Profil sieci „Prywatna”
+   (`Set-NetConnectionProfile -InterfaceAlias "<nazwa>" -NetworkCategory Private`). Na laptopie na czas pomiarów
+   wyłącz Wi-Fi (`Disable-NetAdapter -Name "Wi-Fi" -Confirm:$false`), żeby ruch MPI nie szedł przez drugi adres.
+2. **Ta sama ścieżka repozytorium: `C:\hpc\HPC-quantum-transpilaton`**, ten sam commit i zbudowany projekt
+   (Krok 5). `mpiexec` uruchamia zdalnie program pod tą samą ścieżką i z tym samym katalogiem roboczym.
+   Jeśli repo leży gdzie indziej, zrób dowiązanie (cmd jako administrator):
+   `mklink /J C:\hpc\HPC-quantum-transpilaton E:\ścieżka\do\repo`.
+3. **Wspólne konto `hpc`** z tym samym hasłem na wszystkich komputerach (bez domeny Windows uwierzytelnia
+   zdalnego użytkownika tylko wtedy, gdy u celu istnieje konto o tej samej nazwie i haśle; inaczej
+   `mpiexec` kończy się błędem „Odmowa dostępu (errno 5)”). PowerShell jako administrator:
    ```powershell
-   & "C:\Program Files\Microsoft MPI\Bin\smpd.exe" -d
+   $p = Read-Host "Haslo dla konta hpc (TO SAMO na wszystkich komputerach)" -AsSecureString
+   New-LocalUser -Name hpc -Password $p -PasswordNeverExpires -AccountNeverExpires -FullName "HPC MPI"
+   Add-LocalGroupMember -SID S-1-5-32-544 -Member hpc   # Administratorzy; SID działa w każdej wersji językowej
+   New-ItemProperty -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -Name LocalAccountTokenFilterPolicy -Value 1 -PropertyType DWord -Force
    ```
-3. **Zapora Windows** (PowerShell jako administrator, na każdym hoście): zezwól na `smpd.exe`, `mpiexec.exe` i
-   `qmap_ga.exe` w profilu **Prywatnym** (ścieżkę do `qmap_ga.exe` dostosuj):
+4. **Zapora** (PowerShell jako administrator), profil prywatny. Reguła działa na prawdziwą ścieżkę pliku:
+   jeśli `C:\hpc\...` jest dowiązaniem, dodaj regułę także dla ścieżki docelowej.
    ```powershell
-   $rules = @{
-     "MS-MPI smpd"    = "C:\Program Files\Microsoft MPI\Bin\smpd.exe"
-     "MS-MPI mpiexec" = "C:\Program Files\Microsoft MPI\Bin\mpiexec.exe"
-     "qmap_ga"        = "E:\mgr\sem2\HPC-quantum-transpilaton\build\Release\qmap_ga.exe"
-   }
-   foreach ($n in $rules.Keys) {
-     New-NetFirewallRule -DisplayName $n -Program $rules[$n] -Direction Inbound -Action Allow -Profile Private
-   }
+   $repo = "C:\hpc\HPC-quantum-transpilaton"
+   New-NetFirewallRule -DisplayName "MS-MPI smpd" -Direction Inbound -Action Allow -Profile Private -Program "C:\Program Files\Microsoft MPI\Bin\smpd.exe"
+   New-NetFirewallRule -DisplayName "MS-MPI mpiexec" -Direction Inbound -Action Allow -Profile Private -Program "C:\Program Files\Microsoft MPI\Bin\mpiexec.exe"
+   New-NetFirewallRule -DisplayName "qmap_ga" -Direction Inbound -Action Allow -Profile Private -Program "$repo\build\Release\qmap_ga.exe"
+   New-NetFirewallRule -DisplayName "qmap_mpi_tests" -Direction Inbound -Action Allow -Profile Private -Program "$repo\build\Release\qmap_mpi_tests.exe"
+   New-NetFirewallRule -DisplayName "ICMPv4 ping" -Direction Inbound -Action Allow -Profile Private -Protocol ICMPv4 -IcmpType 8
    ```
-4. **Użytkownik.** Najprościej to samo konto Windows z tym samym hasłem na wszystkich hostach. Inaczej podaj dane
-   jawnie: `mpiexec -pwd <hasło> ...` (lub `-user`, zob. `mpiexec -help2`). Pierwsze uruchomienie z `-pwd` /
-   `-savecreds` może poprosić o hasło.
+5. **Demon `smpd` jako `hpc`** – na **wszystkich** komputerach, łącznie z tym, z którego uruchamiamy `mpiexec`
+   (bez tego: „Serwer RPC jest niedostępny (errno 1722)” dla własnego adresu). Okno zostaje otwarte przez
+   całą sesję pomiarów:
+   ```powershell
+   runas /user:hpc "powershell -NoExit -Command & 'C:\Program Files\Microsoft MPI\Bin\smpd.exe' -d"
+   ```
 
-Test łączności (powinien wypisać nazwy obu komputerów):
+Na komputerze rank 0 komendy `mpiexec` uruchamiamy w oknie konta `hpc` (`runas /user:hpc powershell`)
+z katalogu `C:\hpc\HPC-quantum-transpilaton`. **Zawsze** z `-genv MPICH_NETMASK 192.168.66.0/255.255.255.0`:
+
+- `MPICH_NETMASK` ogranicza MS-MPI do sieci LAN. Bez niego proces na komputerze z wirtualnymi kartami
+  (Hyper-V `vEthernet`, VirtualBox host-only) lub z Wi-Fi ogłasza nieosiągalny adres i połączenia między
+  rankami wiszą do przekroczenia `-timeout`.
+- **`-genv`, nie `-env`.** W postaci MPMD (bloki oddzielone `:`) `-env` dotyczy tylko pierwszego bloku –
+  pozostałe ranki nie dostają maski i program wisi.
+
+Testy łączności (od najprostszego):
 
 ```powershell
-mpiexec -hosts 2 HOST_A 1 HOST_B 1 hostname
+cd C:\hpc\HPC-quantum-transpilaton
+$NM = "192.168.66.0/255.255.255.0"
+Test-NetConnection 192.168.66.2 -Port 8677          # port smpd osiągalny
+mpiexec -timeout 30 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 hostname
+mpiexec -timeout 30 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 nvidia-smi -L
+mpiexec -timeout 120 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 build\Release\qmap_mpi_tests.exe
 ```
 
-Przykład MPMD z różnym `--pop` na każdym hoście (liczność populacji dobrana do karty; `--log results\run.csv` daje osobny plik `run_r<rank>.csv`
-na każdy rank, zapisywany na dysku danego hosta):
+Przykład MPMD z różnym `--pop` na każdej karcie. `--log results\run.csv` daje plik `run_r<rank>.csv` na dysku
+**danego** hosta (katalog jest tworzony automatycznie); `--summary`, `--out-qasm`, `--out-layout` zapisuje tylko
+rank 0:
 
 ```powershell
-mpiexec -n 1 -host HOST_A build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 1000000 --target 20 --max-time 120 --migration adaptiveB --log results\run.csv --out-qasm results\best.qasm --out-layout results\best.json : -n 1 -host HOST_B build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 400000 --target 20 --max-time 120 --migration adaptiveB --log results\run.csv : -n 1 -host HOST_C build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 200000 --target 20 --max-time 120 --migration adaptiveB --log results\run.csv
+mpiexec -timeout 120 -genv MPICH_NETMASK $NM -n 1 -host 192.168.66.61 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 262144 --max-time 20 --generations 100000 --log results\run.csv --summary results\summary.json : -n 1 -host 192.168.66.2 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 131072 --max-time 20 --generations 100000 --log results\run.csv : -n 1 -host 192.168.66.169 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 65536 --max-time 20 --generations 100000 --log results\run.csv
 ```
 
-Uruchamiaj z katalogu repo (ścieżki względne `build\...`, `data\...` muszą istnieć u każdego hosta w tym samym
-katalogu roboczym; `mpiexec` przekazuje katalog bieżący). Wyniki (`--out-qasm`, `--out-layout`) zapisuje wyłącznie
-rank 0. Wartość `--target 20` jest tylko przykładem; poziomy celu opisuje [ADR 0010](adr/0010-ttt.md).
+Diagnostyka zawieszeń: najpierw każdy host osobno (`-hosts 1 <IP> 1 ...`), potem pary, na końcu wszystkie trzy;
+pierwszy wariant, który wisi, wskazuje przyczynę. Okno `smpd -d` na danym komputerze pokazuje połączenia i
+powody odrzucenia.
 
-Typowe problemy: `Failed to connect to smpd` (usługa nie działa albo zapora blokuje), błąd logowania (inne
-konto/hasło, użyj `-pwd`), `The system cannot find the file specified` (inna ścieżka do `qmap_ga.exe` na hoście).
+| Objaw | Przyczyna / rozwiązanie |
+|---|---|
+| `connect failed - Odmowa dostępu (errno 5)` | brak konta `hpc` z tym samym hasłem u celu (pkt 3) |
+| `Serwer RPC jest niedostępny (errno 1722)` | na tym IP nie działa `smpd` (pkt 5), także na własnym komputerze |
+| `Add-LocalGroupMember: Group Administrators was not found` | polski Windows: użyj `-SID S-1-5-32-544` |
+| `mpiexec` wisi do `-timeout`, a `hostname` działa | brak `-genv MPICH_NETMASK`, użyte `-env` w MPMD, Wi-Fi włączone na laptopie |
+| `cannot write results\...` na zdalnym ranku | stara wersja `qmap_ga` (nie tworzyła katalogów) lub brak praw konta `hpc` do repo: `icacls C:\hpc /grant "hpc:(OI)(CI)M" /T` |
 
 ## Problemy
 
