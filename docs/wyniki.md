@@ -76,6 +76,76 @@ Kandydaci specyficzni dla MPI (nie zaimplementowani; do sprawdzenia po profilowa
 - Interwał migracji oparty na czasie (sekundy), nie na generacjach, aby wyspy o różnej prędkości migrowały równie
   często w czasie rzeczywistym.
 
+## Iteracja I – pomiary węzłów (V0, 2026-11-22)
+
+Źródło: `scripts/bench-node.ps1` (commit `19fc6b2`), instancja `qft_n12`, 30 generacji na rozmiar populacji, jeden rank
+na węzeł; pliki `results/bench/bench_<host>_sweep.csv`, `bench_<host>_pop<P>_r0.csv`, `nvsmi_<host>.csv`; wykresy
+`results/plots/bench_sweep.png`, `bench_nvsmi_<host>.png`. Na 5080 przemiatanie powtórzono dwukrotnie: różnice ≤ 3 %.
+
+Przepustowość całej generacji (oceny/s = populacja × generacje / czas):
+
+| Populacja | RTX 5080 | RTX 5070 Laptop | RTX 3060 |
+|---|---|---|---|
+| 4 096 | 4,69 mln | 3,59 mln | 2,62 mln |
+| 16 384 | 6,03 mln | 4,69 mln | 2,87 mln |
+| 65 536 | 6,22 mln | 4,30 mln | 2,86 mln |
+| 262 144 | 5,93 mln | 4,34 mln | 2,73 mln |
+| 1 048 576 | 4,17 mln | 2,85 mln | 1,96 mln |
+| 4 194 304 | 3,14 mln | 1,98 mln | 1,56 mln |
+
+Podział czasu generacji przy populacji 262 144 (średnie z logu CSV):
+
+| Węzeł | Generacja | Ocena na GPU (H2D + kernel + D2H) | Operatory GA na hoście | Udział hosta | Przepustowość samej oceny GPU |
+|---|---|---|---|---|---|
+| RTX 5080 (Ryzen 9 9950X3D) | 43,4 ms | 3,5 ms | 39,9 ms | 92 % | 74 mln/s |
+| RTX 5070 Laptop (i7-14650HX) | 59,6 ms | 6,5 ms | 53,1 ms | 89 % | 40 mln/s |
+| RTX 3060 (i5-10400) | 93,1 ms | 12,1 ms | 81,0 ms | 87 % | 22 mln/s |
+
+Przebiegi ciągłe 120 s (log `nvidia-smi` co 500 ms w oknie przebiegu):
+
+| Węzeł (populacja) | Oceny/s | Śr. wykorzystanie GPU | Śr. zegar SM | Śr. moc | Maks. temp. |
+|---|---|---|---|---|---|
+| RTX 5080 (262 144) | 5,57 mln | 11 % | 818 MHz (maks. 3090) | 27,5 W (limit 360) | 39 °C |
+| RTX 5070 Laptop (65 536) | 3,31 mln | 13 % | 614 MHz (maks. 3090) | 18,4 W | 53 °C |
+| RTX 3060 (131 072) | 2,21 mln | 34 % | 775 MHz (maks. 2130) | 32,5 W (limit 170) | 44 °C |
+
+Wnioski z pomiarów (diagnoza V0, przed jakąkolwiek zmianą kodu):
+
+1. **Wąskie gardło: jednowątkowe operatory GA na hoście.** Na każdej karcie i przy każdej populacji ≥ 16 384 zajmują
+   87–94 % czasu generacji; GPU ocenia populację 8–13× szybciej, niż host ją tworzy. Dowody: kolumny `ops_time_s` i
+   `eval_time_s` w logach, niski udział wykorzystania GPU w `nvidia-smi`. Do potwierdzenia osią czasu `nsys`
+   (krok 7 kampanii).
+2. **Spadek przepustowości powyżej ok. 260 tys. osobników** na wszystkich kartach. Hipoteza: populacja (27 B na
+   osobnika, dwa bufory) przestaje mieścić się w pamięci podręcznej CPU, a losowy dostęp turnieju i krzyżowania staje się
+   ograniczony pamięcią – do sprawdzenia profilem CPU.
+3. **Skutek uboczny: GPU zbija zegary.** Karta bezczynna przez ok. 90 % czasu przechodzi w niskie stany P (P5/P8) i
+   pracuje na 20–40 % maksymalnego zegara; w przebiegu ciągłym czas samej oceny jest przez to dłuższy niż w krótkim
+   przemiataniu (laptop: 3,8 ms zamiast 1,9 ms przy 65 536; 5080: 5,7 ms zamiast 3,5 ms przy 262 144). Temperatury są
+   niskie (≤ 53 °C), więc **nie jest to dławienie termiczne**. Bit `0x4` (SW power cap) pojawił się tylko 3 razy na
+   laptopie; znaczenie bitu `0x400` w `clocks_event_reasons.active` do sprawdzenia w `nvidia-smi -q -d PERFORMANCE`.
+4. **Heterogeniczność jest ograniczona przez CPU, nie przez GPU.** Stosunek samej oceny GPU 5080 : 5070 Laptop : 3060
+   wynosi ok. 1 : 0,54 : 0,29, a stosunek całych generacji ok. 1 : 0,73 : 0,47 – słabszy CPU (i5-10400) ogranicza
+   3060 bardziej niż jego GPU.
+
+## Iteracja I – koszt komunikacji MPI (2026-11-22)
+
+`qmap_mpi_bench` (rank 0 = AMG-NORTH, ping-pong z każdym rankiem, połowa czasu pętli), plik
+`results/bench/mpi_pingpong.csv`:
+
+| Para | 1 B (mediana / min) | 32 KiB | 1 MiB – przepustowość |
+|---|---|---|---|
+| AMG-NORTH ↔ PS04 (karty PCIe, 1 GbE) | 108 µs / 88 µs | 425 µs | 102 MB/s |
+| AMG-NORTH ↔ HyperX_Zuber (karta USB, 1 GbE, laptop w użyciu) | 398 µs / 191 µs | 1174 µs | 37 MB/s |
+| `MPI_Barrier`, 3 rangi | 795 µs / 241 µs | – | – |
+
+Wnioski:
+- Komunikat migracji (31 B) kosztuje 0,1–0,4 ms, czyli **< 1 %** czasu jednej generacji (43–93 ms) i jest wysyłany
+  co 100 generacji – w V0 komunikacja **nie** jest wąskim gardłem.
+- Łącze do PS04 osiąga ok. 102 MB/s ≈ 0,8 Gb/s, czyli praktyczny limit 1 GbE. Łącze do laptopa jest ok. 4× wolniejsze
+  i ma wyższe opóźnienie (karta sieciowa na USB, laptop w normalnym użyciu) – istotne dopiero przy większych
+  komunikatach (np. migracja wielu osobników).
+- Do powtórzenia po kampanii TTT (porównanie warunków).
+
 ## Kandydaci do optymalizacji
 
 **Żaden z poniższych punktów nie jest zaimplementowany w v1.** To lista pomysłów do sprawdzenia po profilowaniu,

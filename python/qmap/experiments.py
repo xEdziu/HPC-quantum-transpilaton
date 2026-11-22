@@ -291,11 +291,13 @@ def parse_nvsmi(path):
         return pd.to_numeric(raw[col].astype(str).str.extract(r"(-?\d+\.?\d*)")[0], errors="coerce")
 
     reasons = next(c for c in raw.columns if c.endswith("reasons.active"))
+    # the last line is often cut off: nvidia-smi is stopped while writing it
     return pd.DataFrame({
-        "time": pd.to_datetime(raw["timestamp"], format="%Y/%m/%d %H:%M:%S.%f"),
+        "time": pd.to_datetime(raw["timestamp"], format="%Y/%m/%d %H:%M:%S.%f", errors="coerce"),
         "temp": num("temperature.gpu"), "clock_sm": num("clocks.current.sm") if any(
             c.startswith("clocks.current.sm") for c in raw.columns) else num("clocks.sm"),
-        "power": num("power.draw"), "util": num("utilization.gpu"), "reasons": raw[reasons].astype(str).str.strip()})
+        "power": num("power.draw"), "util": num("utilization.gpu"),
+        "reasons": raw[reasons].astype(str).str.strip()}).dropna(subset=["time"])
 
 
 def cmd_bench_plot(a):
