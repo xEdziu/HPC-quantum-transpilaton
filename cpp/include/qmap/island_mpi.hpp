@@ -45,6 +45,7 @@ struct GlobalResult {
     int best_rank = 0;            // rank that owns the global best (lowest rank on ties)
     std::vector<uint8_t> best;    // its n_phys genes
     double ttt_s = -1;            // min over ranks of the local ttt_s; < 0 if no rank reached the target
+    std::vector<double> ttt_by_target;  // same reduction per GaResult::ttt_by_target entry (rank 0 only)
     long long evals = 0;          // sum over ranks
     double time_s = 0;            // max over ranks of the local total time
 };

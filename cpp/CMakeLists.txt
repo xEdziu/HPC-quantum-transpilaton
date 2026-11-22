@@ -59,6 +59,10 @@ target_link_libraries(qmap_mpi PUBLIC qmap_core PRIVATE MPI::MPI_CXX)
 add_executable(qmap_ga src/ga_main.cpp)
 target_link_libraries(qmap_ga PRIVATE qmap_core qmap_gpu qmap_mpi CUDA::nvtx3)
 
+# MPI ping-pong / barrier micro-benchmark (no CUDA, no qmap code).
+add_executable(qmap_mpi_bench src/mpi_bench_main.cpp)
+target_link_libraries(qmap_mpi_bench PRIVATE MPI::MPI_CXX)
+
 add_executable(qmap_mpi_tests tests/test_mpi.cpp)
 target_link_libraries(qmap_mpi_tests PRIVATE qmap_mpi MPI::MPI_CXX)
 target_compile_definitions(qmap_mpi_tests PRIVATE QMAP_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data")

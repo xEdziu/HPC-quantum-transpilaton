@@ -78,10 +78,12 @@ uv run python -m qmap.validate --instance qft_n12 --routed results\qft_n12_route
 
 Wyjście `qmap_ga`: każdy rank drukuje `rank=<r> best=<SWAP> generations=<G> evals=<E> time_s=<T> ttt_s=<T lub NA> stop=<powód> migrants_sent=<N> migrants_received=<N>`
 (`stop` to `target`, `max_generations`, `max_time` albo `remote_stop`), a rank 0 na końcu
-`global best=<SWAP> best_rank=<r> ttt_s=<T lub NA> evals=<E> time_s=<T>`.
-Opcje: `--pop`, `--generations`, `--max-time`, `--target`, `--seed`, `--tournament`, `--pc`, `--pm`, `--elite`,
+`global best=<SWAP> best_rank=<r> ttt_s=<T lub NA> evals=<E> time_s=<T>` (przy kilku celach dodatkowo
+` ttt_by_target=172:1.23,164:NA,...`).
+Opcje: `--pop`, `--generations`, `--max-time`, `--target N[,N...]` (lista celów: koniec przy najmniejszym, czas do każdego
+w `ttt_by_target`, [ADR 0012](docs/adr/0012-wiele-progow-ttt.md)), `--seed`, `--tournament`, `--pc`, `--pm`, `--elite`,
 `--migration fixed:N|adaptiveA|adaptiveB` (domyślnie `fixed:100`), `--topology all|ring` (domyślnie `all`),
-`--summary <json>` (rank 0 zapisuje wynik globalny i parametry przebiegu: `best`, `best_rank`, `ttt_s` lub `null`, `evals`, `time_s`, `rank0_stop`, `instance`, `pop`, `seed`, `target`, `migration`, `topology`, `n_ranks`).
+`--summary <json>` (rank 0 zapisuje wynik globalny i parametry przebiegu: `best`, `best_rank`, `ttt_s` lub `null`, `evals`, `time_s`, `rank0_stop`, `instance`, `pop`, `seed`, `target` (najmniejszy), `targets`, `ttt_by_target`, `migration`, `topology`, `n_ranks`).
 `qmap_ga` zawsze działa pod MPI (bez `mpiexec` jako pojedyncza wyspa); `--log` zapisuje osobny plik na każdą
 rangę (`results\run.csv` → `results\run_r0.csv`, `results\run_r1.csv`, …), a `--out-qasm` / `--out-layout` zapisuje tylko rank 0 (globalnie najlepszy wynik).
 
@@ -99,7 +101,8 @@ Test `qmap_mpi_tests` (3 rangi, CPU, bez GPU) uruchamia `ctest`. Konfiguracja kl
 ## Eksperymenty
 
 Pełny protokół (parametry, zagrożenia dla ważności): [docs/protokol-eksperymentow.md](docs/protokol-eksperymentow.md);
-profilowanie: [docs/profilowanie.md](docs/profilowanie.md). Sekwencja poleceń (z komputera rank 0; `data\cluster.json`
+profilowanie: [docs/profilowanie.md](docs/profilowanie.md); kampania pomiarowa iteracji I krok po kroku:
+[docs/kampania-iteracja-1.md](docs/kampania-iteracja-1.md). Sekwencja poleceń (z komputera rank 0; `data\cluster.json`
 tworzymy z `data\cluster.example.json`):
 
 ```powershell

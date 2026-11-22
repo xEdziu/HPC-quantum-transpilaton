@@ -17,6 +17,7 @@ Format: [MADR](https://adr.github.io/madr/), po polsku. Szablon: [0000-szablon.m
 | [0009](0009-zakonczenie.md) | Protokół zakończenia bez gubienia komunikatów | Zaakceptowana |
 | [0010](0010-ttt.md) | Definicja Time-to-Target i poziomy celu | Zaakceptowana |
 | [0011](0011-narzedzia-profilowania.md) | Narzędzia profilowania: Nsight Systems, Nsight Compute, NVTX | Zaakceptowana |
+| [0012](0012-wiele-progow-ttt.md) | Wiele progów TTT mierzonych w jednym przebiegu | Zaakceptowana |
 
 ## Jak dodać ADR
 

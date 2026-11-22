@@ -6,6 +6,11 @@ użytkownik; zapisane raporty (`.nsys-rep`, `.ncu-rep`) są ignorowane przez git
 
 > Komendy z `%q{PMI_RANK}` oraz opcje `nsys` / `ncu` wymienione niżej **trzeba zweryfikować** na docelowych
 > komputerach (wersje Nsight mogą się różnić składnią). Błędy zgłaszamy w tym dokumencie.
+>
+> Profilowanie iteracji I (wersja V0): dokładne komendy dla każdej karty i przebiegu 3-hostowego oraz lista zrzutów
+> ekranu z GUI: [kampania-iteracja-1.md](kampania-iteracja-1.md), kroki 7–8. Ścieżka `nsys` na naszych komputerach:
+> `C:\Program Files\NVIDIA Corporation\Nsight Systems 2025.1.3\target-windows-x64\nsys.exe`. Tło obciążenia i
+> zegary GPU dokumentuje log `nvidia-smi` (kampania, krok 0).
 
 ## Narzędzia
 

@@ -17,16 +17,19 @@ CLUSTER = {
 }
 
 
-def plan_text(configs, instances=("qft_n8", "qft_n12"), reps=3):
-    targets = {(i, ex.eps_tag(e)): 10 + k for i in instances for k, e in enumerate(ex.DEFAULT_EPS)}
-    return ex.build_script(CLUSTER, list(instances), configs, targets, reps, 60, "adaptiveB", "all", "results\\runs")
+def plan_text(configs, instances=("qft_n8", "qft_n12"), reps=3, multi=True):
+    # eps 0.10 / 0.05 / 0.02 -> targets 12 / 11 / 10 (strictest last)
+    targets = {(i, ex.eps_tag(e)): 12 - k for i in instances for k, e in enumerate(ex.DEFAULT_EPS)}
+    return ex.build_script(CLUSTER, list(instances), configs, targets, reps, 60, "adaptiveB", "all", "results\\runs",
+                           multi=multi)
 
 
 def test_plan_command_count_and_pops():
     text = plan_text(ex.DEFAULT_CONFIGS)
     mpi = [ln for ln in text.splitlines() if ln.lstrip().startswith("mpiexec") and "Tee-Object" in ln]
-    assert len(mpi) == 4 * 2 * 3 * 3  # configs x instances x eps x reps
-    full = next(ln for ln in mpi if "rtx5080+rtx5070+rtx3060\\qft_n8\\eps0.10\\rep2" in ln)
+    assert len(mpi) == 4 * 2 * 3  # configs x instances x reps: one run per rep with all eps targets
+    full = next(ln for ln in mpi if "rtx5080+rtx5070+rtx3060\\qft_n8\\rep2" in ln)
+    assert full.count("--target 12,11,10 ") == 3  # same list on every rank
     assert [p.split()[0] for p in full.split("--pop ")[1:]] == ["1000", "400", "200"]
     assert full.count("--summary") == 1  # rank 0 only
     assert full.count(" : ") == 2
@@ -39,15 +42,23 @@ def test_plan_command_count_and_pops():
 def test_plan_run_dirs_distinct_seeds_paired():
     text = plan_text(["rtx5080", "rtx5080+rtx3060"])
     dirs = [ln.split("Test-Path ")[1].split("\\summary.json")[0] for ln in text.splitlines() if "Test-Path" in ln]
-    assert len(dirs) == len(set(dirs)) == 2 * 2 * 3 * 3
+    assert len(dirs) == len(set(dirs)) == 2 * 2 * 3
     # same seed for the same rep in every config
     seeds = {}
     for ln in text.splitlines():
         if ln.lstrip().startswith("mpiexec") and "Tee-Object" in ln:
             d = ln.split("Tee-Object ")[1].split("\\stdout.txt")[0]
-            cfg, inst, tag, rep = d.split("\\")[2:]
-            seeds.setdefault((inst, tag, rep), set()).add(ln.split("--seed ")[1].split()[0])
+            cfg, inst, rep = d.split("\\")[2:]
+            seeds.setdefault((inst, rep), set()).add(ln.split("--seed ")[1].split()[0])
     assert all(len(v) == 1 for v in seeds.values())
+
+
+def test_plan_explicit_target_keeps_tag_layout():
+    text = ex.build_script(CLUSTER, ["qft_n8"], ["rtx5080"], {("qft_n8", "target25"): 25}, 2, 60, "adaptiveB", "all",
+                           "results\\runs")
+    mpi = [ln for ln in text.splitlines() if "Tee-Object" in ln]
+    assert len(mpi) == 2
+    assert "results\\runs\\rtx5080\\qft_n8\\target25\\rep1" in mpi[0] and "--target 25 " in mpi[0]
 
 
 def test_plan_script_is_ascii_and_resumable():
@@ -75,6 +86,41 @@ def test_censored_median():
     assert math.isnan(ex.censored_median([1, 2], 5))
     assert ex.censored_median([1, 2], 4) == 2  # lower median
     assert ex.censored_median([5, 1, 3, 2, 4], 5) == 3
+
+
+def test_load_runs_multi_target_censoring(tmp_path):
+    targets = {("qft_n8", "eps0.10"): 12, ("qft_n8", "eps0.05"): 11, ("qft_n8", "eps0.02"): 10}
+    # two reps of one config; rep2 never reaches the strictest target
+    for rep, by in [(1, {"12": 0.5, "11": 1.0, "10": 2.0}), (2, {"12": 0.7, "11": 1.5, "10": None})]:
+        d = tmp_path / "runs" / "rtx5080" / "qft_n8" / f"rep{rep}"
+        d.mkdir(parents=True)
+        (d / "summary.json").write_text(json.dumps(
+            {"best": 10 + rep, "ttt_s": by["10"], "target": 10, "targets": [12, 11, 10], "ttt_by_target": by,
+             "n_ranks": 1, "instance": "qft_n8"}), encoding="utf-8")
+        pd.DataFrame({"evals_per_s": [100.0]}).to_csv(d / "run_r0.csv", index=False)
+    df = ex.load_runs(tmp_path / "runs", targets)
+    assert len(df) == 2 * 3  # reps x eps
+    agg = ex.aggregate_runs(df).set_index("eps")
+    assert agg.loc["eps0.10", "successes"] == 2 and agg.loc["eps0.10", "median_ttt_s"] == 0.5
+    assert agg.loc["eps0.02", "successes"] == 1 and agg.loc["eps0.02", "success_rate"] == 0.5
+    assert agg.loc["eps0.02", "median_ttt_s"] == 2.0  # lower median of 2 runs, one censored
+    assert set(agg["target"]) == {12, 11, 10}
+    assert df["throughput"].eq(100.0).all()
+    with pytest.raises(SystemExit):
+        ex.load_runs(tmp_path / "runs")  # multi-target layout needs targets.csv
+
+
+def test_parse_nvsmi(tmp_path):
+    f = tmp_path / "nvsmi.csv"
+    f.write_text("timestamp, temperature.gpu, clocks.current.sm [MHz], power.draw [W], utilization.gpu [%], "
+                 "clocks_throttle_reasons.active\n"
+                 "2026/11/22 14:00:00.500, 61, 2400 MHz, 250.25 W, 99 %, 0x0000000000000000\n"
+                 "2026/11/22 14:00:01.000, 63, 1800 MHz, 240.00 W, 98 %, 0x0000000000000080\n", encoding="utf-8")
+    d = ex.parse_nvsmi(f)
+    assert list(d["clock_sm"]) == [2400, 1800] and list(d["temp"]) == [61, 63]
+    assert d["power"].iloc[0] == pytest.approx(250.25) and list(d["util"]) == [99, 98]
+    assert d["reasons"].iloc[1] == "0x0000000000000080"
+    assert (d["time"].iloc[1] - d["time"].iloc[0]).total_seconds() == 0.5
 
 
 def make_df(data):
