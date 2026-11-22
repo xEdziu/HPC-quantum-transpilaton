@@ -20,6 +20,8 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+# Polish Windows formats numbers as "0,0123" and dates as "2026.11.22", which breaks the CSV and its parsers.
+[System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 $hostName = $env:COMPUTERNAME
