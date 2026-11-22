@@ -40,12 +40,18 @@ def read_targets(path):
         return {(r["instance"], eps_tag(float(r["eps"]))): int(r["target"]) for r in csv.DictReader(f)}
 
 
+NO_GENERATION_CAP = 1_000_000_000
+
+
 def rank_command(cluster, host, instance, target, seed, max_time, migration, topology, run_dir, rank0):
     """One mpiexec section (-n 1 -host H exe args) for a single rank."""
     args = [
         f"-n 1 -host {host['host']} {cluster['exe']}",
         f"--instance data\\instances\\{instance}.qasm", f"--device {cluster['device']}",
-        f"--pop {host['pop']}", f"--max-time {max_time:g}", f"--target {target}", f"--seed {seed}",
+        # no generation cap: runs end only on --max-time or the target (qmap_ga defaults to 1000 generations,
+        # which ended the first pilot after ~60 s and left faster islands idle)
+        f"--pop {host['pop']}", f"--generations {NO_GENERATION_CAP}", f"--max-time {max_time:g}",
+        f"--target {target}", f"--seed {seed}",
         f"--migration {migration}", f"--topology {topology}", f"--log {run_dir}\\run.csv",
     ]
     if rank0:
