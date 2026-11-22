@@ -131,9 +131,8 @@ int main(int argc, char** argv) {
         std::ofstream csv;
         if (!log_path.empty()) {
             const std::string path = with_rank(log_path, mpi.rank());
-            csv.open(path, std::ios::binary);  // binary: "\n" endings on Windows
-            if (!csv) throw std::runtime_error("cannot write " + path);
-            csv << "generation,elapsed_s,best,mean,gen_time_s,eval_time_s,ops_time_s,evals,evals_per_s,"
+            csv = qmap::open_output(path);
+            csv <<"generation,elapsed_s,best,mean,gen_time_s,eval_time_s,ops_time_s,evals,evals_per_s,"
                    "migrants_sent,migrants_received,interval\n";
         }
         const qmap::GenerationLog log = [&csv, &island](const qmap::GenerationStats& s) {
@@ -189,9 +188,8 @@ int main(int argc, char** argv) {
                 j["migration"] = migration_arg;
                 j["topology"] = topology_arg;
                 j["n_ranks"] = mpi.size();
-                std::ofstream out(summary_path, std::ios::binary);
-                if (!out) throw std::runtime_error("cannot write " + summary_path);
-                out << j.dump(2) << "\n";
+                std::ofstream out = qmap::open_output(summary_path);
+                out <<j.dump(2) << "\n";
             }
         }
     } catch (const std::exception& e) {

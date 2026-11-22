@@ -8,6 +8,7 @@ from qmap import experiments as ex
 
 CLUSTER = {
     "repo_path": "E:\\repo", "exe": "build\\Release\\qmap_ga.exe", "device": "data\\devices\\falcon27.json",
+    "netmask": "192.168.66.0/255.255.255.0",
     "hosts": [
         {"name": "rtx5080", "host": "HOST_A", "pop": 1000, "gpu": "x"},
         {"name": "rtx5070", "host": "HOST_B", "pop": 400, "gpu": "x"},
@@ -31,6 +32,8 @@ def test_plan_command_count_and_pops():
     assert full.count(" : ") == 2
     assert "-host HOST_A" in full.split(" : ")[0]
     assert "--seed 2" in full
+    # netmask must be global (-genv) so it reaches every MPMD section
+    assert full.lstrip().startswith("mpiexec -genv MPICH_NETMASK 192.168.66.0/255.255.255.0 -n 1")
 
 
 def test_plan_run_dirs_distinct_seeds_paired():

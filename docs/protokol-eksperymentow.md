@@ -23,9 +23,11 @@ się między sobą).
 
 1. **Ten sam commit na wszystkich hostach.** `git pull`, `git rev-parse HEAD` identyczny na każdym komputerze;
    zbuduj Release (README) i uruchom `.\scripts\check-env.ps1` (same `[ OK ]`). Układ katalogów taki sam
-   ([instalacja-windows.md](instalacja-windows.md), Krok 7), `smpd` i zapora skonfigurowane, test łączności
-   `mpiexec -hosts 2 HOST_A 1 HOST_B 1 hostname`.
-2. **Konfiguracja klastra.** `copy data\cluster.example.json data\cluster.json` i uzupełnij nazwy hostów oraz `pop`
+   ([instalacja-windows.md](instalacja-windows.md), Krok 7), `smpd` jako `hpc` na wszystkich 3 hostach, zapora,
+   test łączności z okna konta `hpc`:
+   `mpiexec -timeout 30 -genv MPICH_NETMASK 192.168.66.0/255.255.255.0 -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 hostname`.
+2. **Konfiguracja klastra.** `data\cluster.example.json` zawiera nasz klaster (IP, maska sieci dla `-genv MPICH_NETMASK`);
+   `copy data\cluster.example.json data\cluster.json` i ewentualnie popraw `pop`
    (nazwa konfiguracji = nazwy hostów z `cluster.json` połączone `+`; pierwszy host to rank 0 i komputer, z którego
    uruchamiamy skrypt). `pop` dobieramy tak, aby jedna generacja trwała znacznie krócej niż limit TDR systemu Windows
    (domyślnie ok. 2 s) i karta była nasycona; zapisz dobrane wartości.
