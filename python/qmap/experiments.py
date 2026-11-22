@@ -1,8 +1,10 @@
 """Experiment pipeline: run-script generation, pilot targets, aggregation, validation and plots.
 
 Directory layout of one run (created by the generated PowerShell script):
-    <out>/<config>/<instance>/<tag>/rep<k>/{summary.json,run_r<rank>.csv,best.qasm,best.json,stdout.txt}
-where <tag> is eps<e> (target from the pilot table) or target<N> (explicit target).
+    <out>/<config>/<instance>/rep<k>/              plan --targets-from: one run per rep, all eps targets of the
+                                                   instance in one --target list (summary.json: ttt_by_target)
+    <out>/<config>/<instance>/target<N>/rep<k>/    plan --target N (explicit single target)
+each holding {summary.json,run_r<rank>.csv,best.qasm,best.json,stdout.txt}.
 Definitions: docs/adr/0010-ttt.md; procedure: docs/protokol-eksperymentow.md.
 """
 import argparse
@@ -52,8 +54,15 @@ def rank_command(cluster, host, instance, target, seed, max_time, migration, top
     return " ".join(args)
 
 
-def build_script(cluster, instances, configs, targets, reps, max_time, migration, topology, out):
-    """PowerShell script text (ASCII only); targets = {(instance, tag): target}."""
+def target_list(targets, instance):
+    """All distinct targets of one instance, loosest first: '11,10,9' (the run stops at the last one)."""
+    return ",".join(str(t) for t in sorted({t for (i, _), t in targets.items() if i == instance}, reverse=True))
+
+
+def build_script(cluster, instances, configs, targets, reps, max_time, migration, topology, out, multi=False):
+    """PowerShell script text (ASCII only); targets = {(instance, tag): target}.
+
+    multi: one run per (rep, instance, config) with all targets of the instance in one --target list."""
     hosts = {h["name"]: h for h in cluster["hosts"]}
     # -genv (not -env): in MPMD form -env applies only to the first section. MPICH_NETMASK keeps MS-MPI
     # off virtual adapters (Hyper-V, VirtualBox) and Wi-Fi that other hosts cannot reach.
@@ -68,12 +77,12 @@ def build_script(cluster, instances, configs, targets, reps, max_time, migration
     # seed = rep: identical across configs (paired comparison).
     for rep in range(1, reps + 1):
         for instance in instances:
-            for (inst, tag), target in sorted(targets.items()):
-                if inst != instance:
-                    continue
+            runs = [(None, target_list(targets, instance))] if multi else \
+                [(tag, target) for (inst, tag), target in sorted(targets.items()) if inst == instance]
+            for tag, target in runs:
                 for config in configs:
                     members = [hosts[n] for n in config.split("+")]
-                    run_dir = f"{out}\\{config}\\{instance}\\{tag}\\rep{rep}"
+                    run_dir = f"{out}\\{config}\\{instance}" + (f"\\{tag}" if tag else "") + f"\\rep{rep}"
                     ranks = [rank_command(cluster, h, instance, target, rep, max_time, migration, topology,
                                           run_dir, i == 0) for i, h in enumerate(members)]
                     lines.append(f"if (-not (Test-Path {run_dir}\\summary.json)) {{")
@@ -95,7 +104,7 @@ def cmd_plan(a):
         instances = a.instances
         targets = {(i, f"target{a.target}"): a.target for i in instances}
     text = build_script(cluster, instances, a.configs, targets, a.reps, a.max_time, a.migration, a.topology,
-                        a.out.replace("/", "\\"))
+                        a.out.replace("/", "\\"), multi=bool(a.targets_from))
     path = Path(a.script)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="ascii", newline="\n") as f:  # raises on non-ASCII
@@ -132,23 +141,37 @@ def cmd_pilot(a):
         print(r)
 
 
-def load_runs(runs_dir):
-    """One row per run (summary.json); throughput = sum over ranks of mean evals_per_s, if all rank CSVs exist."""
+def load_runs(runs_dir, targets=None):
+    """One row per (run, eps); throughput = sum over ranks of mean evals_per_s, if all rank CSVs exist.
+
+    <config>/<instance>/rep<k> (multi-target run): one row per eps of the instance, TTT taken from
+    ttt_by_target via targets = read_targets(targets.csv). <config>/<instance>/<tag>/rep<k> (explicit target):
+    one row, tag as the eps column, TTT = ttt_s."""
     rows = []
     for sp in sorted(Path(runs_dir).rglob("summary.json")):
         rel = sp.parent.relative_to(runs_dir).parts
-        if len(rel) != 4:
+        if len(rel) not in (3, 4):
             continue
         s = json.loads(sp.read_text(encoding="utf-8"))
         csvs = sorted(sp.parent.glob("run_r*.csv"))
         thr = sum(pd.read_csv(c)["evals_per_s"].mean() for c in csvs) if len(csvs) == s["n_ranks"] else math.nan
         vp = sp.parent / "validate.json"
-        rows.append({
-            "config": rel[0], "instance": rel[1], "eps": rel[2], "rep": int(rel[3][3:]), "dir": str(sp.parent),
-            "best": s["best"], "target": s["target"], "n_ranks": s["n_ranks"],
-            "ttt_s": math.nan if s["ttt_s"] is None else s["ttt_s"], "throughput": thr,
-            "valid": json.loads(vp.read_text(encoding="utf-8"))["valid"] if vp.exists() else None,
-        })
+        common = {"config": rel[0], "instance": rel[1], "rep": int(rel[-1][3:]), "dir": str(sp.parent),
+                  "best": s["best"], "n_ranks": s["n_ranks"], "throughput": thr,
+                  "valid": json.loads(vp.read_text(encoding="utf-8"))["valid"] if vp.exists() else None}
+        if len(rel) == 4:
+            rows.append({**common, "eps": rel[2], "target": s["target"],
+                         "ttt_s": math.nan if s["ttt_s"] is None else s["ttt_s"]})
+            continue
+        if targets is None:
+            raise SystemExit(f"{sp.parent}: multi-target run, pass the pilot targets.csv (--targets)")
+        for (instance, tag), target in sorted(targets.items()):
+            if instance != rel[1]:
+                continue
+            if str(target) not in s["ttt_by_target"]:
+                raise SystemExit(f"{sp}: target {target} ({tag}) missing in ttt_by_target; targets.csv changed?")
+            t = s["ttt_by_target"][str(target)]
+            rows.append({**common, "eps": tag, "target": target, "ttt_s": math.nan if t is None else t})
     return pd.DataFrame(rows)
 
 
@@ -194,7 +217,7 @@ def quality_table(df, sabre_csv):
 
 
 def cmd_aggregate(a):
-    df = load_runs(a.runs)
+    df = load_runs(a.runs, read_targets(a.targets) if Path(a.targets).exists() else None)
     if df.empty:
         raise SystemExit(f"aggregate: no runs under {a.runs}")
     out = Path(a.out)
@@ -217,7 +240,7 @@ def cmd_validate_runs(a):
     for sp in sorted(Path(a.runs).rglob("best.json")):
         if (sp.parent / "validate.json").exists() or not (sp.parent / "best.qasm").exists():
             continue
-        instance = sp.parent.parent.parent.name
+        instance = sp.parent.relative_to(a.runs).parts[1]  # <config>/<instance>/[<tag>/]rep<k>
         layout = json.loads(sp.read_text(encoding="utf-8"))
         routed = loads((sp.parent / "best.qasm").read_text(encoding="utf-8"))
         report = validate(load_instance(instance), routed, layout["initial"], layout["final"], cm, k=1)
@@ -233,7 +256,7 @@ def cmd_plot(a):
 
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    df = load_runs(a.runs)
+    df = load_runs(a.runs, read_targets(a.targets) if Path(a.targets).exists() else None)
     for (instance, eps), g in df.groupby(["instance", "eps"]):  # ECDF; censored runs keep the curve below 1
         fig, ax = plt.subplots()
         for config, c in g.groupby("config"):
@@ -264,7 +287,7 @@ def build_parser():
     p.add_argument("--cluster", default="data/cluster.json")
     p.add_argument("--instances", nargs="+")
     p.add_argument("--configs", nargs="+", default=DEFAULT_CONFIGS, help="host names joined by '+'")
-    p.add_argument("--targets-from", help="targets.csv from the pilot subcommand")
+    p.add_argument("--targets-from", help="targets.csv from the pilot subcommand: one run per rep, all eps targets")
     p.add_argument("--target", type=int, help="explicit target (pilot: -1 = run until --max-time)")
     p.add_argument("--reps", type=int, default=10)
     p.add_argument("--max-time", type=float, default=120)
@@ -283,6 +306,7 @@ def build_parser():
     p = sub.add_parser("aggregate", help="results/aggregate.csv (TTT, speedup, efficiency) and quality.csv")
     p.add_argument("--runs", default="results/runs")
     p.add_argument("--sabre", default="results/baseline/sabre.csv")
+    p.add_argument("--targets", default="results/pilot/targets.csv", help="maps ttt_by_target keys to eps")
     p.add_argument("--out", default="results")
     p.add_argument("--baseline-config", default="rtx5080")
     p.set_defaults(func=cmd_aggregate)
@@ -294,7 +318,8 @@ def build_parser():
     p = sub.add_parser("plot", help="TTT ECDF per (instance, eps); optional convergence of one run directory")
     p.add_argument("--runs", default="results/runs")
     p.add_argument("--out", default="results/plots")
-    p.add_argument("--convergence", help="run directory, e.g. results/runs/rtx5080/qft_n12/eps0.10/rep1")
+    p.add_argument("--targets", default="results/pilot/targets.csv", help="maps ttt_by_target keys to eps")
+    p.add_argument("--convergence", help="run directory, e.g. results/runs/rtx5080/qft_n12/rep1")
     p.set_defaults(func=cmd_plot)
     return ap
 
