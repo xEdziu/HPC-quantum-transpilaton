@@ -23,7 +23,7 @@ import qiskit  # noqa: E402
 from qiskit import QuantumCircuit, qasm2  # noqa: E402
 
 from qmap import instances  # noqa: E402
-from qmap.device import DEVICE_PATH, load_backend, load_device  # noqa: E402
+from qmap.device import DEVICE_PATH, load_device  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 SABRE_CSV = ROOT / "results" / "baseline" / "sabre.csv"
@@ -136,18 +136,28 @@ def table_device(out):
 
 # ------------------------------------------------------------------------------------------ figures
 
+# Heavy-hex grid positions (row, column) of the 27-qubit IBM Falcon, as used by qiskit's gate-map drawer.
+# Avoids qiskit's Graphviz requirement; checked below against the device edges (every edge = one grid step).
+FALCON27_COORDS = [(1, 0), (1, 1), (2, 1), (3, 1), (1, 2), (3, 2), (0, 3), (1, 3), (3, 3), (4, 3), (1, 4), (3, 4),
+                   (1, 5), (2, 5), (3, 5), (1, 6), (3, 6), (0, 7), (1, 7), (3, 7), (4, 7), (1, 8), (3, 8), (1, 9),
+                   (2, 9), (3, 9), (3, 10)]
+
+
 def figure_topology(out):
-    backend = load_backend()
-    try:
-        from qiskit.visualization import plot_gate_map
-        fig = plot_gate_map(backend, figsize=(4.5, 6), qubit_size=34, font_size=13, line_width=4)
-    except Exception as e:  # plot_gate_map missing or without coordinates for this backend
-        print(f"plot_gate_map failed ({e}); using a networkx layout")
-        _, cm = load_device()
-        g = nx.Graph([tuple(e) for e in cm.get_edges()])
-        fig, ax = plt.subplots(figsize=(4.5, 6))
-        nx.draw(g, nx.spring_layout(g, seed=7), ax=ax, with_labels=True, node_color="#4c78a8", font_color="white",
-                node_size=520, font_size=11)
+    data, _ = load_device()
+    edges = [tuple(e) for e in data["edges"]]
+    for a, b in edges:
+        (ra, ca), (rb, cb) = FALCON27_COORDS[a], FALCON27_COORDS[b]
+        assert abs(ra - rb) + abs(ca - cb) == 1, f"edge {a}-{b} is not a grid step"
+    g = nx.Graph(edges)
+    pos = {q: (c, -r) for q, (r, c) in enumerate(FALCON27_COORDS)}
+    fig, ax = plt.subplots(figsize=(7.5, 3.4))
+    nx.draw_networkx_edges(g, pos, ax=ax, width=3, edge_color="#9aa5b1")
+    nx.draw_networkx_nodes(g, pos, ax=ax, node_size=620, node_color="#4c78a8")
+    nx.draw_networkx_labels(g, pos, ax=ax, font_size=11, font_color="white")
+    ax.set_title(f"{data['name']} (IBM Falcon): {data['n_phys']} qubits, {len(edges)} couplings", fontsize=11)
+    ax.set_axis_off()
+    ax.margins(0.05)
     save(fig, out, "topology_falcon27")
 
 
