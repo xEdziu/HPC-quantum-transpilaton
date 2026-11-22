@@ -279,6 +279,81 @@ def cmd_plot(a):
         plt.close(fig)
 
 
+def parse_nvsmi(path):
+    """nvidia-smi CSV (bench-node.ps1 / campaign log) -> time, temp [C], clock_sm [MHz], power [W], util [%], reasons.
+
+    Header names carry units ('clocks.current.sm [MHz]'), values too (' 1815 MHz'); both are normalised."""
+    raw = pd.read_csv(path, skipinitialspace=True)
+    raw.columns = [c.split("[")[0].strip() for c in raw.columns]
+
+    def num(prefix):
+        col = next(c for c in raw.columns if c.startswith(prefix))
+        return pd.to_numeric(raw[col].astype(str).str.extract(r"(-?\d+\.?\d*)")[0], errors="coerce")
+
+    reasons = next(c for c in raw.columns if c.endswith("reasons.active"))
+    return pd.DataFrame({
+        "time": pd.to_datetime(raw["timestamp"], format="%Y/%m/%d %H:%M:%S.%f"),
+        "temp": num("temperature.gpu"), "clock_sm": num("clocks.current.sm") if any(
+            c.startswith("clocks.current.sm") for c in raw.columns) else num("clocks.sm"),
+        "power": num("power.draw"), "util": num("utilization.gpu"), "reasons": raw[reasons].astype(str).str.strip()})
+
+
+def cmd_bench_plot(a):
+    """Plots of the node benchmarks (bench-node.ps1) and of the MPI ping-pong (qmap_mpi_bench)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    bench, out = Path(a.bench), Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    sweeps = sorted(bench.glob("bench_*_sweep.csv"))
+    if sweeps:  # throughput of one GPU vs population size
+        fig, ax = plt.subplots()
+        for f in sweeps:
+            d = pd.read_csv(f)
+            d = d[(d["phase"] == "sweep") & d["status"].isin(["ok", "slow"])]
+            ax.plot(d["pop"], d["evals_per_s"], "o-", label=f.stem.split("_")[1])
+        ax.set(xscale="log", xlabel="population size", ylabel="evaluations / s", title="GPU throughput vs population")
+        ax.legend()
+        fig.savefig(out / "bench_sweep.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+    for f in sorted(bench.glob("nvsmi_*.csv")):  # clocks, temperature, power, utilisation; sustained run shaded
+        host = f.stem.split("_", 1)[1]
+        d = parse_nvsmi(f)
+        fig, axes = plt.subplots(4, 1, sharex=True, figsize=(8, 7))
+        for ax, col, label in zip(axes, ["clock_sm", "temp", "power", "util"],
+                                  ["SM clock [MHz]", "temperature [C]", "power [W]", "utilisation [%]"]):
+            ax.plot(d["time"], d[col], lw=0.8)
+            ax.set_ylabel(label)
+        sw = bench / f"bench_{host}_sweep.csv"
+        if sw.exists():
+            s = pd.read_csv(sw)
+            s = s[s["phase"] == "sustain"]
+            if len(s):
+                t0 = pd.to_datetime(s["start"].iloc[0], format="%Y/%m/%d %H:%M:%S.%f")
+                t1 = pd.to_datetime(s["end"].iloc[0], format="%Y/%m/%d %H:%M:%S.%f")
+                for ax in axes:
+                    ax.axvspan(t0, t1, color="orange", alpha=0.15)
+                axes[0].set_title(f"{host}: sustained run shaded; throttle reasons seen: "
+                                  f"{sorted(set(d[(d['time'] >= t0) & (d['time'] <= t1)]['reasons']))}", fontsize=9)
+        fig.autofmt_xdate()
+        fig.savefig(out / f"bench_nvsmi_{host}.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+    pp = bench / "mpi_pingpong.csv"
+    if pp.exists():
+        d = pd.read_csv(pp)
+        d = d[d["peer_rank"] >= 0]
+        fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4))
+        for (rank, host), g in d.groupby(["peer_rank", "peer_host"]):
+            a1.plot(g["bytes"], g["lat_median_us"], "o-", label=f"rank {rank} ({host})")
+            a2.plot(g["bytes"], g["bw_MBps"], "o-", label=f"rank {rank} ({host})")
+        a1.set(xscale="log", yscale="log", xlabel="message size [B]", ylabel="half round trip, median [us]")
+        a2.set(xscale="log", xlabel="message size [B]", ylabel="bandwidth [MB/s]")
+        a1.legend()
+        fig.savefig(out / "mpi_pingpong.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+
 def build_parser():
     ap = argparse.ArgumentParser(prog="qmap.experiments", description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -321,6 +396,11 @@ def build_parser():
     p.add_argument("--targets", default="results/pilot/targets.csv", help="maps ttt_by_target keys to eps")
     p.add_argument("--convergence", help="run directory, e.g. results/runs/rtx5080/qft_n12/rep1")
     p.set_defaults(func=cmd_plot)
+
+    p = sub.add_parser("bench-plot", help="plots of results/bench: GPU sweep, nvidia-smi logs, MPI ping-pong")
+    p.add_argument("--bench", default="results/bench")
+    p.add_argument("--out", default="results/plots")
+    p.set_defaults(func=cmd_bench_plot)
     return ap
 
 

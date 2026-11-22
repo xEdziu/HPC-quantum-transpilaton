@@ -110,6 +110,19 @@ def test_load_runs_multi_target_censoring(tmp_path):
         ex.load_runs(tmp_path / "runs")  # multi-target layout needs targets.csv
 
 
+def test_parse_nvsmi(tmp_path):
+    f = tmp_path / "nvsmi.csv"
+    f.write_text("timestamp, temperature.gpu, clocks.current.sm [MHz], power.draw [W], utilization.gpu [%], "
+                 "clocks_throttle_reasons.active\n"
+                 "2026/11/22 14:00:00.500, 61, 2400 MHz, 250.25 W, 99 %, 0x0000000000000000\n"
+                 "2026/11/22 14:00:01.000, 63, 1800 MHz, 240.00 W, 98 %, 0x0000000000000080\n", encoding="utf-8")
+    d = ex.parse_nvsmi(f)
+    assert list(d["clock_sm"]) == [2400, 1800] and list(d["temp"]) == [61, 63]
+    assert d["power"].iloc[0] == pytest.approx(250.25) and list(d["util"]) == [99, 98]
+    assert d["reasons"].iloc[1] == "0x0000000000000080"
+    assert (d["time"].iloc[1] - d["time"].iloc[0]).total_seconds() == 0.5
+
+
 def make_df(data):
     rows = [dict(config=c, instance="a", eps="eps0.10", rep=i, best=7, target=8,
                  ttt_s=math.nan if t is None else t, throughput=thr, valid=None)
