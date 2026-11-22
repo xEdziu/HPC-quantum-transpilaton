@@ -138,11 +138,13 @@ results/pilot/rtx5080+rtx5070+rtx3060/qft_n20/target-1/rep1`), wydłuż pilotaż
 
 Jeden przebieg na (konfiguracja, instancja, powtórzenie) ze wszystkimi trzema progami ε = 0,10 / 0,05 / 0,02
 (`--target <T_0.10>,<T_0.05>,<T_0.02>`, koniec przy najostrzejszym; [ADR 0012](adr/0012-wiele-progow-ttt.md)). 4 konfiguracje ×
-4 instancje × 10 powtórzeń = 160 przebiegów po najwyżej 60 s: ok. 2,7 h plus start `mpiexec`. Ziarno = numer powtórzenia
+4 instancje × 10 powtórzeń = 160 przebiegów po najwyżej 120 s: najwyżej ok. 5,3 h plus start `mpiexec` (przebieg,
+który osiągnie najostrzejszy próg, kończy się wcześniej). Limit 120 s wynika z pilotażu (zob. [wyniki.md](wyniki.md)); skrypt
+jest wznawialny, więc kampanię można podzielić na kilka sesji. Ziarno = numer powtórzenia
 (to samo dla każdej konfiguracji); powtórzenia są przeplatane w czasie.
 
 ```powershell
-uv run python -m qmap.experiments plan --cluster data\cluster.json --targets-from results/pilot/targets.csv --instances qft_n12 qft_n20 qaoa_n16 qaoa_n24 --reps 10 --max-time 60 --out results/runs --script run_all.ps1
+uv run python -m qmap.experiments plan --cluster data\cluster.json --targets-from results/pilot/targets.csv --instances qft_n12 qft_n20 qaoa_n16 qaoa_n24 --reps 10 --max-time 120 --out results/runs --script run_all.ps1
 .\run_all.ps1                                   # wznawialny: pomija przebiegi z istniejącym summary.json
 .\scripts\collect-results.ps1 -Cluster data\cluster.json -Path results\runs
 uv run python -m qmap.experiments validate-runs --runs results/runs

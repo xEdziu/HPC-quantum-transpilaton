@@ -146,6 +146,67 @@ Wnioski:
   komunikatach (np. migracja wielu osobników).
 - Do powtórzenia po kampanii TTT (porównanie warunków).
 
+## Iteracja I – pilotaż i progi TTT (2026-11-22)
+
+Konfiguracja: wszystkie 3 węzły (5080 / 5070 Laptop / 3060, populacje 262 144 / 65 536 / 131 072), 4 instancje,
+3 ziarna, 300 s na przebieg, bez celu, migracja `adaptiveB`, topologia `all`. Każdy przebieg zakończył się
+`stop=max_time` (ok. 300 s). Wcześniejszy pilotaż z domyślnym limitem 1000 generacji jest w `results/pilot_gen1000`
+(odrzucony, zob. dziennik decyzji).
+
+Najlepsza znana wartość B (minimum z 3 ziaren) i progi T_ε = ⌈(1+ε)·B⌉ (`results/pilot/targets.csv`):
+
+| Instancja | Wyniki 3 ziaren | B | T_0,10 | T_0,05 | T_0,02 | SABRE min / mediana |
+|---|---|---|---|---|---|---|
+| qft_n12 | 150 / 151 / 152 | 150 | 165 | 158 | 153 | 51 / 53 |
+| qft_n20 | 698 / 654 / 666 | 654 | 720 | 687 | 668 | 170 / 177 |
+| qaoa_n16 | 30 / 27 / 28 | 27 | 30 | 29 | 28 | 19 / 20 |
+| qaoa_n24 | 51 / 58 / 52 | 51 | 57 | 54 | 53 | 35 / 41 |
+
+Względem pilotażu z limitem 1000 generacji (ok. 60 s) B poprawiło się tylko dla qft_n20 (686 → 654) i qaoa_n24
+(53 → 51).
+
+Czas do osiągnięcia progu w przebiegach pilotażowych (minimum po rankach, z logów `run_r*.csv`; „–” = nie osiągnięto
+w 300 s):
+
+| Instancja | Ziarno | T_0,10 | T_0,05 | T_0,02 |
+|---|---|---|---|---|
+| qft_n12 | 1 | 2,1 s | 4,0 s | 14,6 s |
+| qft_n12 | 2 | 1,1 s | 9,3 s | 47,1 s |
+| qft_n12 | 3 | 1,5 s | 2,6 s | 105,0 s |
+| qft_n20 | 1 | 7,1 s | – | – |
+| qft_n20 | 2 | 1,6 s | 16,8 s | 135,4 s |
+| qft_n20 | 3 | 1,7 s | 44,5 s | 96,1 s |
+| qaoa_n16 | 1 | 84,1 s | – | – |
+| qaoa_n16 | 2 | 45,7 s | 53,7 s | 285,2 s |
+| qaoa_n16 | 3 | 9,4 s | 18,4 s | 26,7 s |
+| qaoa_n24 | 1 | 19,5 s | 19,5 s | 28,8 s |
+| qaoa_n24 | 2 | – | – | – |
+| qaoa_n24 | 3 | 19,1 s | 43,9 s | 45,0 s |
+
+Liczba przebiegów (z 12), które osiągnęły próg w danym czasie, konfiguracja 3-hostowa:
+
+| Limit czasu | T_0,10 | T_0,05 | T_0,02 |
+|---|---|---|---|
+| 60 s | 10 | 8 | 5 |
+| 120 s | 11 | 8 | 7 |
+| 300 s | 11 | 8 | 9 |
+
+Przepustowość w klastrze (qft_n12, ziarno 1, oceny / 300 s): 5080 ok. 5,55 mln/s (6351 generacji, ok. 47 ms na
+generację), 5070 Laptop ok. 3,30 mln/s (15 090 generacji, ok. 20 ms), 3060 ok. 2,16 mln/s (4954 generacje, ok. 61 ms);
+razem ok. 11,0 mln/s. Wartości dla laptopa i 3060 są niższe niż w pomiarze pojedynczego węzła (`bench-node`);
+przyczyna nie jest zbadana (laptop był w tym czasie używany, zob. zagrożenia trafności).
+
+Obserwacje:
+- **Rozkład TTT jest dwumodalny.** Przebieg albo osiąga próg w kilkadziesiąt sekund, albo utyka na jednej wartości
+  do końca (qaoa_n24, ziarno 2: 58 przez 300 s, nie osiągnął nawet T_0,10; qft_n20, ziarno 1: 698). Wydłużenie
+  przebiegu powyżej ok. 2 minut daje niewiele (T_0,02: 5 → 7 → 9 z 12 przy 60 / 120 / 300 s).
+- Na końcu przebiegu wszystkie wyspy mają zwykle tę samą wartość best: migracja `all` szybko ujednolica populacje
+  (wyjątek: qaoa_n16, ziarno 2 – 27 na 5080, 29 na pozostałych).
+- To ten sam objaw przedwczesnej zbieżności co w pilotażu z limitem generacji. Jest to słaby punkt algorytmiczny
+  (kandydat: restart / zachowanie różnorodności), niezależny od wąskiego gardła na CPU hosta.
+- Luka jakości względem SABRE (QFT ok. 3–4×, QAOA ok. 1,3–1,5×) wynika z naiwnego routera zachłannego (ADR 0007),
+  nie z czasu przebiegu.
+
 ## Kandydaci do optymalizacji
 
 **Żaden z poniższych punktów nie jest zaimplementowany w v1.** To lista pomysłów do sprawdzenia po profilowaniu,

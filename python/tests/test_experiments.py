@@ -35,6 +35,8 @@ def test_plan_command_count_and_pops():
     assert full.count(" : ") == 2
     assert "-host HOST_A" in full.split(" : ")[0]
     assert "--seed 2" in full
+    # every rank: no generation cap, so only --max-time or the target ends a run
+    assert full.count(f"--generations {ex.NO_GENERATION_CAP}") == 3
     # netmask must be global (-genv) so it reaches every MPMD section
     assert full.lstrip().startswith("mpiexec -genv MPICH_NETMASK 192.168.66.0/255.255.255.0 -n 1")
 
