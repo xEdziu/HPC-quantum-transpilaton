@@ -127,6 +127,25 @@ Wnioski z pomiarów (diagnoza V0, przed jakąkolwiek zmianą kodu):
    wynosi ok. 1 : 0,54 : 0,29, a stosunek całych generacji ok. 1 : 0,73 : 0,47 – słabszy CPU (i5-10400) ogranicza
    3060 bardziej niż jego GPU.
 
+## Iteracja I – koszt komunikacji MPI (2026-11-22)
+
+`qmap_mpi_bench` (rank 0 = AMG-NORTH, ping-pong z każdym rankiem, połowa czasu pętli), plik
+`results/bench/mpi_pingpong.csv`:
+
+| Para | 1 B (mediana / min) | 32 KiB | 1 MiB – przepustowość |
+|---|---|---|---|
+| AMG-NORTH ↔ PS04 (karty PCIe, 1 GbE) | 108 µs / 88 µs | 425 µs | 102 MB/s |
+| AMG-NORTH ↔ HyperX_Zuber (karta USB, 1 GbE, laptop w użyciu) | 398 µs / 191 µs | 1174 µs | 37 MB/s |
+| `MPI_Barrier`, 3 rangi | 795 µs / 241 µs | – | – |
+
+Wnioski:
+- Komunikat migracji (31 B) kosztuje 0,1–0,4 ms, czyli **< 1 %** czasu jednej generacji (43–93 ms) i jest wysyłany
+  co 100 generacji – w V0 komunikacja **nie** jest wąskim gardłem.
+- Łącze do PS04 osiąga ok. 102 MB/s ≈ 0,8 Gb/s, czyli praktyczny limit 1 GbE. Łącze do laptopa jest ok. 4× wolniejsze
+  i ma wyższe opóźnienie (karta sieciowa na USB, laptop w normalnym użyciu) – istotne dopiero przy większych
+  komunikatach (np. migracja wielu osobników).
+- Do powtórzenia po kampanii TTT (porównanie warunków).
+
 ## Kandydaci do optymalizacji
 
 **Żaden z poniższych punktów nie jest zaimplementowany w v1.** To lista pomysłów do sprawdzenia po profilowaniu,
