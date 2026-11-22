@@ -146,6 +146,7 @@ Na **każdym** komputerze:
    New-NetFirewallRule -DisplayName "MS-MPI mpiexec" -Direction Inbound -Action Allow -Profile Private -Program "C:\Program Files\Microsoft MPI\Bin\mpiexec.exe"
    New-NetFirewallRule -DisplayName "qmap_ga" -Direction Inbound -Action Allow -Profile Private -Program "$repo\build\Release\qmap_ga.exe"
    New-NetFirewallRule -DisplayName "qmap_mpi_tests" -Direction Inbound -Action Allow -Profile Private -Program "$repo\build\Release\qmap_mpi_tests.exe"
+   New-NetFirewallRule -DisplayName "qmap_mpi_bench" -Direction Inbound -Action Allow -Profile Private -Program "$repo\build\Release\qmap_mpi_bench.exe"
    New-NetFirewallRule -DisplayName "ICMPv4 ping" -Direction Inbound -Action Allow -Profile Private -Protocol ICMPv4 -IcmpType 8
    ```
 5. **Demon `smpd` jako `hpc`** – na **wszystkich** komputerach, łącznie z tym, z którego uruchamiamy `mpiexec`
@@ -173,6 +174,13 @@ Test-NetConnection 192.168.66.2 -Port 8677          # port smpd osiągalny
 mpiexec -timeout 30 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 hostname
 mpiexec -timeout 30 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 nvidia-smi -L
 mpiexec -timeout 120 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 build\Release\qmap_mpi_tests.exe
+```
+
+Pomiar opóźnienia i przepustowości MPI między hostami (`qmap_mpi_bench`, wymaga reguły zapory jak dla `qmap_ga`;
+opis w [kampania-iteracja-1.md](kampania-iteracja-1.md)):
+
+```powershell
+mpiexec -timeout 120 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 build\Release\qmap_mpi_bench.exe --out results\bench\mpi_pingpong.csv
 ```
 
 Przykład MPMD z różnym `--pop` na każdej karcie. `--log results\run.csv` daje plik `run_r<rank>.csv` na dysku
