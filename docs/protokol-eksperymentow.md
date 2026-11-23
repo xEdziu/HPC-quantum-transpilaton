@@ -30,7 +30,7 @@ się między sobą).
    zbuduj Release (README) i uruchom `.\scripts\check-env.ps1` (same `[ OK ]`). Układ katalogów taki sam
    ([instalacja-windows.md](instalacja-windows.md), Krok 7), `smpd` jako `hpc` na wszystkich 3 hostach, zapora,
    test łączności z okna konta `hpc`:
-   `mpiexec -timeout 30 -genv MPICH_NETMASK 192.168.66.0/255.255.255.0 -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 hostname`.
+   `mpiexec -timeout 30 -genv MPICH_NETMASK 192.168.66.0/255.255.255.0 -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.222 1 hostname`.
 2. **Konfiguracja klastra.** `data\cluster.example.json` zawiera nasz klaster (IP, maska sieci dla `-genv MPICH_NETMASK`);
    `copy data\cluster.example.json data\cluster.json` i ewentualnie popraw `pop`
    (nazwa konfiguracji = nazwy hostów z `cluster.json` połączone `+`; pierwszy host to rank 0 i komputer, z którego
@@ -109,7 +109,7 @@ się między sobą).
   ale nie porównujemy czasów bezwzględnych między hostami.
 - **Termika i zasilanie.** Laptop (RTX 5070 Laptop) może dławić zegary pod długim obciążeniem; wynik zależy od
   kolejności przebiegów. Dlatego: logi `nvidia-smi` przed serią, przeplatanie konfiguracji w czasie, powtórzenia, mediana zamiast średniej.
-- **Laptop w normalnym użyciu.** Właściciel używa laptopa (RTX 5070 Laptop, 192.168.66.169) podczas pomiarów i nie
+- **Laptop w normalnym użyciu.** Właściciel używa laptopa (RTX 5070 Laptop, 192.168.66.222) podczas pomiarów i nie
   możemy tego zabronić. Obciążenie tła (CPU, GPU, sieć) może wydłużać czasy konfiguracji z laptopem i zwiększać rozrzut.
   Nie eliminujemy tego, tylko dokumentujemy: ciągły log `nvidia-smi` (użycie GPU, zegar SM, temperatura, moc, powody
   dławienia) na laptopie przez całą kampanię (`results\bench\nvsmi_campaign_<host>.csv`), migawki „top CPU” z

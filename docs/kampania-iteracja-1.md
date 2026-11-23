@@ -18,7 +18,7 @@ programu. Wszystkie polecenia uruchamiamy my; żaden z agentów ich nie uruchami
   ```powershell
   cd C:\hpc\HPC-quantum-transpilaton
   $NM = "192.168.66.0/255.255.255.0"
-  $H3 = @("-hosts", "3", "192.168.66.61", "1", "192.168.66.2", "1", "192.168.66.169", "1")   # rank 0 = RTX 5080
+  $H3 = @("-hosts", "3", "192.168.66.61", "1", "192.168.66.2", "1", "192.168.66.222", "1")   # rank 0 = RTX 5080
   ```
 
   Użycie: `mpiexec -timeout 120 -genv MPICH_NETMASK $NM @H3 <program> ...`.
@@ -40,7 +40,7 @@ programu. Wszystkie polecenia uruchamiamy my; żaden z agentów ich nie uruchami
    Hash commitu zapisujemy do sprawozdania (sekcja 1.2). Reguła zapory dla `qmap_mpi_bench.exe`: Krok 7 w
    [instalacja-windows.md](instalacja-windows.md).
 2. **`smpd -d` jako `hpc` na wszystkich 3 komputerach** (łącznie z rank 0), okna zostają otwarte.
-3. **Laptop (RTX 5070 Laptop, 192.168.66.169):** kabel Ethernet, Wi-Fi wyłączone (`Disable-NetAdapter -Name "Wi-Fi"
+3. **Laptop (RTX 5070 Laptop, 192.168.66.222):** kabel Ethernet do wbudowanej karty (nie karty USB), Wi-Fi wyłączone (`Disable-NetAdapter -Name "Wi-Fi"
    -Confirm:$false`), zasilacz podłączony, tryb wydajności. Laptop pozostaje w **normalnym użyciu** przez właściciela
    (nie możemy tego zabronić), więc nie wymagamy „zamknięcia wszystkiego”; zamiast tego **dokumentujemy obciążenie tła**
    (punkt 4) i opisujemy je w sprawozdaniu jako zagrożenie trafności ([dziennik decyzji](dziennik-decyzji.md)).
@@ -88,7 +88,7 @@ czytelne logi). Laptop: poproś właściciela o kilka minut bez obciążenia GPU
 # RTX 3060 (PS04)
 mpiexec -timeout 1800 -genv MPICH_NETMASK $NM -hosts 1 192.168.66.2 1 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\bench-node.ps1 -Instance qft_n12 -OutDir results\bench -SustainPop 131072
 # RTX 5070 Laptop (HyperX_Zuber)
-mpiexec -timeout 1800 -genv MPICH_NETMASK $NM -hosts 1 192.168.66.169 1 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\bench-node.ps1 -Instance qft_n12 -OutDir results\bench -SustainPop 65536
+mpiexec -timeout 1800 -genv MPICH_NETMASK $NM -hosts 1 192.168.66.222 1 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\bench-node.ps1 -Instance qft_n12 -OutDir results\bench -SustainPop 65536
 # zebranie plików ze zdalnych hostów i wykresy
 .\scripts\collect-results.ps1 -Cluster data\cluster.json -Path results\bench
 uv run python -m qmap.experiments bench-plot --bench results\bench --out results\plots
@@ -195,7 +195,7 @@ największego rozmiaru bez `slow` i zapisz to). Nazwa raportu zawiera nazwę hos
 mkdir results\prof -Force | Out-Null
 mpiexec -timeout 300 -genv MPICH_NETMASK $NM -hosts 1 192.168.66.61 1 $NSYS profile -t cuda,nvtx --force-overwrite true --output results\prof\nsys_AMG-NORTH build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 262144 --generations 50 --seed 1 --log results\prof\run_AMG-NORTH.csv
 mpiexec -timeout 300 -genv MPICH_NETMASK $NM -hosts 1 192.168.66.2 1 $NSYS profile -t cuda,nvtx --force-overwrite true --output results\prof\nsys_PS04 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 262144 --generations 50 --seed 1 --log results\prof\run_PS04.csv
-mpiexec -timeout 300 -genv MPICH_NETMASK $NM -hosts 1 192.168.66.169 1 $NSYS profile -t cuda,nvtx --force-overwrite true --output results\prof\nsys_HyperX_Zuber build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 262144 --generations 50 --seed 1 --log results\prof\run_HyperX_Zuber.csv
+mpiexec -timeout 300 -genv MPICH_NETMASK $NM -hosts 1 192.168.66.222 1 $NSYS profile -t cuda,nvtx --force-overwrite true --output results\prof\nsys_HyperX_Zuber build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 262144 --generations 50 --seed 1 --log results\prof\run_HyperX_Zuber.csv
 ```
 
 **7.2 `nsys` przebiegu na 3 hostach (po jednym raporcie na rank).** Nazwa z rangą przez `%q{PMI_RANK}` (w apostrofach,
@@ -203,7 +203,7 @@ mpiexec -timeout 300 -genv MPICH_NETMASK $NM -hosts 1 192.168.66.169 1 $NSYS pro
 
 ```powershell
 $A = @("--instance", "data\instances\qft_n12.qasm", "--device", "data\devices\falcon27.json", "--max-time", "20", "--generations", "100000", "--seed", "1", "--migration", "adaptiveB", "--topology", "all")
-mpiexec -timeout 300 -genv MPICH_NETMASK $NM -n 1 -host 192.168.66.61 $NSYS profile -t cuda,nvtx --force-overwrite true --output 'results\prof\nsys3_%q{PMI_RANK}' build\Release\qmap_ga.exe @A --pop 262144 --log results\prof\run3.csv : -n 1 -host 192.168.66.2 $NSYS profile -t cuda,nvtx --force-overwrite true --output 'results\prof\nsys3_%q{PMI_RANK}' build\Release\qmap_ga.exe @A --pop 131072 --log results\prof\run3.csv : -n 1 -host 192.168.66.169 $NSYS profile -t cuda,nvtx --force-overwrite true --output 'results\prof\nsys3_%q{PMI_RANK}' build\Release\qmap_ga.exe @A --pop 65536 --log results\prof\run3.csv
+mpiexec -timeout 300 -genv MPICH_NETMASK $NM -n 1 -host 192.168.66.61 $NSYS profile -t cuda,nvtx --force-overwrite true --output 'results\prof\nsys3_%q{PMI_RANK}' build\Release\qmap_ga.exe @A --pop 262144 --log results\prof\run3.csv : -n 1 -host 192.168.66.2 $NSYS profile -t cuda,nvtx --force-overwrite true --output 'results\prof\nsys3_%q{PMI_RANK}' build\Release\qmap_ga.exe @A --pop 131072 --log results\prof\run3.csv : -n 1 -host 192.168.66.222 $NSYS profile -t cuda,nvtx --force-overwrite true --output 'results\prof\nsys3_%q{PMI_RANK}' build\Release\qmap_ga.exe @A --pop 65536 --log results\prof\run3.csv
 ```
 
 Jeśli `%q{PMI_RANK}` nie działa, użyj trzech osobnych nazw (`nsys3_r0`, `nsys3_r1`, `nsys3_r2`) w trzech sekcjach.
@@ -231,7 +231,7 @@ $NCU = (Get-ChildItem 'C:\Program Files\NVIDIA Corporation\Nsight Compute*\ncu.e
 **7.5 Zebranie raportów** (skrypt `collect-results.ps1` kopiuje tylko logi, więc profile ręcznie; duże pliki):
 
 ```powershell
-foreach ($ip in "192.168.66.2", "192.168.66.169") {
+foreach ($ip in "192.168.66.2", "192.168.66.222") {
     robocopy "\\$ip\C$\hpc\HPC-quantum-transpilaton\results\prof" results\prof *.nsys-rep *.ncu-rep run*.csv stats_*.csv /NJH /NJS /NP
 }
 ```
