@@ -6,7 +6,7 @@
   "netmask": "192.168.66.0/255.255.255.0",
   "hosts": [
     {"name": "rtx5080", "host": "192.168.66.61", "pop": 262144, "gpu": "RTX 5080", "hostname": "AMG-NORTH"},
-    {"name": "rtx5070", "host": "192.168.66.169", "pop": 65536, "gpu": "RTX 5070 Laptop", "hostname": "HyperX_Zuber"},
+    {"name": "rtx5070", "host": "192.168.66.222", "pop": 65536, "gpu": "RTX 5070 Laptop", "hostname": "HyperX_Zuber"},
     {"name": "rtx3060", "host": "192.168.66.2", "pop": 131072, "gpu": "RTX 3060", "hostname": "PS04"}
   ]
 }

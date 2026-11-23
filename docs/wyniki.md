@@ -146,6 +146,26 @@ Wnioski:
   komunikatach (np. migracja wielu osobników).
 - Do powtórzenia po kampanii TTT (porównanie warunków).
 
+### Powtórzenie po zmianie karty sieciowej laptopa (2026-11-23)
+
+Przed drugą sesją kampanii TTT laptop przepięto z karty USB na wbudowaną kartę Ethernet (Realtek Gaming GbE,
+nowy adres 192.168.66.222; [dziennik decyzji](dziennik-decyzji.md)). Plik `results/bench/mpi_pingpong_2026-11-23.csv`:
+
+| Para | 1 B (mediana / min) | 32 KiB | 1 MiB – przepustowość |
+|---|---|---|---|
+| AMG-NORTH ↔ PS04 (bez zmian) | 105 µs / 81 µs | 427 µs | 102 MB/s |
+| AMG-NORTH ↔ HyperX_Zuber (wbudowana karta, 1 GbE) | 100 µs / 86 µs | 352 µs | 113 MB/s |
+| `MPI_Barrier`, 3 rangi | 230 µs / 178 µs | – | – |
+
+Wnioski:
+- Łącze do PS04 jest powtarzalne (108 → 105 µs, 102 MB/s), więc pomiar jest stabilny.
+- Łącze do laptopa: opóźnienie 398 → 100 µs (ok. 4×), przepustowość 37 → 113 MB/s (ok. 3×), `MPI_Barrier`
+  795 → 230 µs. Laptop jest teraz w sieci równorzędny z PS04; za wcześniejszy gorszy wynik odpowiadała karta USB.
+- Wpływ na kampanię: komunikacja w V0 i tak zajmowała < 1 % czasu generacji, więc zmiana karty między sesjami
+  (powtórzenia 1–4 na karcie USB, 5–10 na wbudowanej) nie powinna wyraźnie zmienić TTT konfiguracji z laptopem.
+  Mimo to opisujemy ją w sprawozdaniu jako zagrożenie trafności i porównujemy TTT obu sesji w konfiguracjach z
+  laptopem.
+
 ## Iteracja I – pilotaż i progi TTT (2026-11-22)
 
 Konfiguracja: wszystkie 3 węzły (5080 / 5070 Laptop / 3060, populacje 262 144 / 65 536 / 131 072), 4 instancje,

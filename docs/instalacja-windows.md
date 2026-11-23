@@ -115,7 +115,7 @@ Procedura sprawdzona 2026-11-22 na naszych trzech komputerach (grupa robocza Win
 |---|---|---|
 | RTX 5080 (rank 0, uruchamia `mpiexec`) | AMG-NORTH | 192.168.66.61 |
 | RTX 3060 | PS04 | 192.168.66.2 |
-| RTX 5070 Laptop | HyperX_Zuber | 192.168.66.169 (kabel) |
+| RTX 5070 Laptop | HyperX_Zuber | 192.168.66.222 (wbudowana karta Ethernet; do 2026-11-22: .169, karta USB) |
 
 W naszej sieci **nazwy hostów nie są rozwiązywane**, więc wszędzie używamy adresów IP. Konfiguracja dla
 `qmap.experiments plan`: [`data/cluster.example.json`](../data/cluster.example.json).
@@ -171,16 +171,16 @@ Testy łączności (od najprostszego):
 cd C:\hpc\HPC-quantum-transpilaton
 $NM = "192.168.66.0/255.255.255.0"
 Test-NetConnection 192.168.66.2 -Port 8677          # port smpd osiągalny
-mpiexec -timeout 30 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 hostname
-mpiexec -timeout 30 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 nvidia-smi -L
-mpiexec -timeout 120 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 build\Release\qmap_mpi_tests.exe
+mpiexec -timeout 30 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.222 1 hostname
+mpiexec -timeout 30 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.222 1 nvidia-smi -L
+mpiexec -timeout 120 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.222 1 build\Release\qmap_mpi_tests.exe
 ```
 
 Pomiar opóźnienia i przepustowości MPI między hostami (`qmap_mpi_bench`, wymaga reguły zapory jak dla `qmap_ga`;
 opis w [kampania-iteracja-1.md](kampania-iteracja-1.md)):
 
 ```powershell
-mpiexec -timeout 120 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.169 1 build\Release\qmap_mpi_bench.exe --out results\bench\mpi_pingpong.csv
+mpiexec -timeout 120 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.222 1 build\Release\qmap_mpi_bench.exe --out results\bench\mpi_pingpong.csv
 ```
 
 Przykład MPMD z różnym `--pop` na każdej karcie. `--log results\run.csv` daje plik `run_r<rank>.csv` na dysku
@@ -188,7 +188,7 @@ Przykład MPMD z różnym `--pop` na każdej karcie. `--log results\run.csv` daj
 rank 0:
 
 ```powershell
-mpiexec -timeout 120 -genv MPICH_NETMASK $NM -n 1 -host 192.168.66.61 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 262144 --max-time 20 --generations 100000 --log results\run.csv --summary results\summary.json : -n 1 -host 192.168.66.2 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 131072 --max-time 20 --generations 100000 --log results\run.csv : -n 1 -host 192.168.66.169 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 65536 --max-time 20 --generations 100000 --log results\run.csv
+mpiexec -timeout 120 -genv MPICH_NETMASK $NM -n 1 -host 192.168.66.61 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 262144 --max-time 20 --generations 100000 --log results\run.csv --summary results\summary.json : -n 1 -host 192.168.66.2 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 131072 --max-time 20 --generations 100000 --log results\run.csv : -n 1 -host 192.168.66.222 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 65536 --max-time 20 --generations 100000 --log results\run.csv
 ```
 
 Diagnostyka zawieszeń: najpierw każdy host osobno (`-hosts 1 <IP> 1 ...`), potem pary, na końcu wszystkie trzy;
