@@ -37,8 +37,19 @@ def test_plan_command_count_and_pops():
     assert "--seed 2" in full
     # every rank: no generation cap, so only --max-time or the target ends a run
     assert full.count(f"--generations {ex.NO_GENERATION_CAP}") == 3
-    # netmask must be global (-genv) so it reaches every MPMD section
-    assert full.lstrip().startswith("mpiexec -genv MPICH_NETMASK 192.168.66.0/255.255.255.0 -n 1")
+    # global options before the first section: -timeout (hung run) and -genv netmask (reaches every MPMD section)
+    assert full.lstrip().startswith("mpiexec -timeout 120 -genv MPICH_NETMASK 192.168.66.0/255.255.255.0 -n 1")
+
+
+def test_plan_timeout_and_failed_run_log():
+    assert ex.mpiexec_timeout(120) == 180
+    assert ex.mpiexec_timeout(0.5) == 1 + ex.MPIEXEC_TIMEOUT_MARGIN_S
+    lines = plan_text(["rtx5080"], instances=("qft_n8",), reps=1).splitlines()
+    i = next(k for k, ln in enumerate(lines) if "Tee-Object" in ln)
+    # the line right after mpiexec records a non-zero exit (timeout, lost host) before the retry overwrites stdout.txt
+    assert lines[i + 1].strip() == ('if ($LASTEXITCODE -ne 0) { Add-Content results\\runs\\failed_runs.log '
+                                    '"$(Get-Date -Format s) exit=$LASTEXITCODE results\\runs\\rtx5080\\qft_n8\\rep1" }')
+    assert lines[i + 2].strip() == "}"
 
 
 def test_plan_run_dirs_distinct_seeds_paired():
