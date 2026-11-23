@@ -152,7 +152,11 @@ uv run python -m qmap.experiments aggregate --runs results/runs --sabre results/
 uv run python -m qmap.experiments plot --runs results/runs --out results/plots --convergence results/runs/rtx5080+rtx5070+rtx3060/qft_n20/rep1
 ```
 
-Przerwany `run_all.ps1` uruchamiamy ponownie tą samą komendą. Układ katalogów:
+Przerwany `run_all.ps1` uruchamiamy ponownie tą samą komendą. Każdy `mpiexec` ma `-timeout` = limit przebiegu + 60 s
+(tu 180 s): zawieszony przebieg (np. host zniknął z sieci) zostaje przerwany, nie zapisuje `summary.json` i wykona się
+ponownie przy następnym uruchomieniu skryptu. Każdy przebieg z niezerowym kodem wyjścia trafia do
+`results\runs\failed_runs.log` (do sprawozdania). Przed sesją wyłączamy usypianie laptopa
+(`powercfg /change standby-timeout-ac 0`). Układ katalogów:
 `results\runs\<konfiguracja>\<instancja>\rep<k>\` (`summary.json` z `targets` i `ttt_by_target`, `best.qasm`, `best.json`,
 `run_r<rank>.csv`, `stdout.txt`). Wynik: `results\aggregate.csv` (częstość sukcesu, mediana z cenzurowaniem, kwartyle,
 przepustowość, przyspieszenie, efektywność, na konfigurację, instancję i ε), `results\quality.csv`, wykresy ECDF TTT.
