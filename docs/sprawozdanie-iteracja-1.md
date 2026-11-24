@@ -43,8 +43,10 @@ Liczby i wnioski są opisane w [wyniki.md](wyniki.md) (sekcje „Iteracja I – 
     `results/plots/ttt_ecdf_<instancja>_<eps>.png`. Do tekstu 2–4 wykresy (np. qft_n20 przy ε 0,05, qaoa_n16 przy
     ε 0,10), reszta do załącznika.
   - Zbieżność: `results/plots/convergence_runs_rtx5080+rtx5070+rtx3060_qft_n20_rep1.png`.
-  - Jakość względem SABRE: `results/quality.csv` – GA 1,4–1,5× więcej SWAP-ów dla QAOA, 2,9–3,9× dla QFT
-    (naiwny router, ADR 0007).
+  - Jakość względem SABRE (wszystkie 12 instancji): `results/quality-agg/quality.csv`, tabela w [wyniki.md](wyniki.md)
+    – GA 1,2–1,7× więcej SWAP-ów dla QAOA, 2,8–4,7× dla QFT, luka rośnie z rozmiarem QFT (naiwny router, ADR 0007).
+    Proponowany wykres: słupki GA / SABRE min na instancję (dane z tego pliku). `results/quality.csv` to ta sama
+    miara tylko dla 4 instancji kampanii.
 
 ## 5. Koszt rozproszenia
 
@@ -68,7 +70,6 @@ Tabela z [adr/README.md](adr/README.md) i [dziennik-decyzji.md](dziennik-decyzji
 ## Jeszcze brakuje
 
 - Zrzuty Nsight Systems / Nsight Compute (rozdział 8 [kampania-iteracja-1.md](kampania-iteracja-1.md)).
-- Osobny pomiar jakości względem SABRE (12 instancji, krok 6 kampanii).
 
 ## Przygotowanie archiwum
 
@@ -76,7 +77,7 @@ W oknie uv, w katalogu repozytorium:
 
 ```powershell
 uv run python -m qmap.experiments bench-plot --bench results\bench --out results\plots
-Compress-Archive -Force -Path results\figures, results\plots, results\bench, results\aggregate.csv, results\quality.csv, results\pilot\targets.csv, results\runs\rtx5080\qft_n12\rep1 -DestinationPath sprawozdanie_iter1.zip
+Compress-Archive -Force -Path results\figures, results\plots, results\bench, results\aggregate.csv, results\quality.csv, results\quality-agg, results\pilot\targets.csv, results\runs\rtx5080\qft_n12\rep1 -DestinationPath sprawozdanie_iter1.zip
 ```
 
 Przykładowy przebieg (`rtx5080/qft_n12/rep1`) daje wzór `summary.json` i logu `run_r0.csv`. Zrzuty Nsight dosyłamy po

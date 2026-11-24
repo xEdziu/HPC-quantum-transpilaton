@@ -200,6 +200,8 @@ powody odrzucenia.
 | `connect failed - Odmowa dostępu (errno 5)` | brak konta `hpc` z tym samym hasłem u celu (pkt 3) |
 | `Serwer RPC jest niedostępny (errno 1722)` | na tym IP nie działa `smpd` (pkt 5), także na własnym komputerze |
 | `Add-LocalGroupMember: Group Administrators was not found` | polski Windows: użyj `-SID S-1-5-32-544` |
+| `Failed to connect to SMPD Manager Instance error 5` dla własnego adresu | `mpiexec` uruchomiony z okna innego konta niż `hpc` (np. administratora); uruchom z okna `runas /user:hpc` |
+| `Timeout after 180 seconds`, a katalog przebiegu jest pusty (brak nawet `run_r0.csv`) | rank 0 czeka w `MPI_Init` na zdalny `qmap_ga`; uruchom krótki przebieg (`--max-time 10`) osobno na każdym hoście, potem na trzech – pierwszy, który wisi, wskazuje host |
 | `mpiexec` wisi do `-timeout`, a `hostname` działa | brak `-genv MPICH_NETMASK`, użyte `-env` w MPMD, Wi-Fi włączone na laptopie |
 | `cannot write results\...` na zdalnym ranku | stara wersja `qmap_ga` (nie tworzyła katalogów) lub brak praw konta `hpc` do repo: `icacls C:\hpc /grant "hpc:(OI)(CI)M" /T` |
 
