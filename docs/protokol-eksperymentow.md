@@ -94,8 +94,9 @@ się między sobą).
 ## Co raportujemy
 
 - Na (konfiguracja, instancja, ε): częstość sukcesu w limicie, mediana TTT (**dolna mediana z cenzurowaniem**: przebiegi
-  bez sukcesu liczone jako +∞; mediana jest określona tylko gdy sukces ≥ 50 %, inaczej `NaN`), kwartyle TTT po
-  przebiegach z sukcesem.
+  bez sukcesu liczone jako +∞; mediana jest określona tylko gdy sukces ≥ 50 %, inaczej `NaN`), kwartyle TTT liczone tak samo
+  (k-ta najmniejsza wartość, k = ⌈q·n⌉, z porażkami jako +∞; `NaN`, gdy wypada na porażkę), więc zawsze
+  Q1 ≤ mediana ≤ Q3 i zgadzają się z wykresem ECDF.
 - Przyspieszenie `S = mediana TTT(rtx5080) / mediana TTT(konfiguracja)`; przepustowość = suma po rangach średniej
   `evals_per_s`; efektywność heterogeniczna `E = S / (przepustowość(konfiguracja) / przepustowość(rtx5080))`.
   E < 1: węzeł dodaje mniej, niż wynikałoby z jego mocy obliczeniowej.

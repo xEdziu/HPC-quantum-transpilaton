@@ -196,15 +196,23 @@ def load_runs(runs_dir, targets=None):
     return pd.DataFrame(rows)
 
 
+def censored_quantile(ttts, n, q):
+    """Inverse-ECDF q-quantile (ceil(q*n)-th smallest) of n runs; runs missing from ttts are censored (+inf).
+
+    NaN when that order statistic is censored, so median and quartiles share one definition and q1 <= median <= q3.
+    """
+    k = max(1, math.ceil(q * n))
+    s = sorted(ttts)
+    return float(s[k - 1]) if k <= len(s) else math.nan
+
+
 def censored_median(ttts, n):
     """Lower median of n runs where the runs missing from ttts are censored (+inf); NaN if undefined."""
-    k = math.ceil(n / 2)
-    s = sorted(ttts)
-    return s[k - 1] if k <= len(s) else math.nan
+    return censored_quantile(ttts, n, 0.5)
 
 
 def aggregate_runs(df, baseline="rtx5080"):
-    """Per (config, instance, eps): success rate, censored median TTT, IQR of successes, speedup, efficiency."""
+    """Per (config, instance, eps): success rate, censored median and quartiles of TTT, speedup, efficiency."""
     rows = []
     for (config, instance, eps), g in df.groupby(["config", "instance", "eps"]):
         ok = g["ttt_s"].dropna().to_numpy()
@@ -213,8 +221,8 @@ def aggregate_runs(df, baseline="rtx5080"):
             "config": config, "instance": instance, "eps": eps, "target": g["target"].iloc[0], "n": len(g),
             "successes": len(ok), "success_rate": len(ok) / len(g),
             "median_ttt_s": censored_median(ok, len(g)),
-            "q1_ttt_s": float(np.percentile(ok, 25)) if len(ok) else math.nan,
-            "q3_ttt_s": float(np.percentile(ok, 75)) if len(ok) else math.nan,
+            "q1_ttt_s": censored_quantile(ok, len(g), 0.25),
+            "q3_ttt_s": censored_quantile(ok, len(g), 0.75),
             "best_min": int(g["best"].min()), "throughput": g["throughput"].mean(),
             "validated": len(checked), "valid": sum(bool(v) for v in checked),
         })
