@@ -107,7 +107,8 @@ def test_censored_quartiles_ordered():
     assert ex.censored_quantile(ok, 10, 0.25) == 30
     assert ex.censored_quantile(ok, 10, 0.5) == 118
     assert math.isnan(ex.censored_quantile(ok, 10, 0.75))
-    assert ex.censored_quantile([4, 2, 3, 9, 8], 5, 0.25) == 2 and ex.censored_quantile([4, 2, 3, 9, 8], 5, 0.75) == 8
+    # sorted 2,3,4,8,9: q1 = 2nd (ceil(1.25)), q3 = 4th (ceil(3.75))
+    assert ex.censored_quantile([4, 2, 3, 9, 8], 5, 0.25) == 3 and ex.censored_quantile([4, 2, 3, 9, 8], 5, 0.75) == 8
 
 
 def test_load_runs_multi_target_censoring(tmp_path):

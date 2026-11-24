@@ -60,6 +60,14 @@ programu. Wszystkie polecenia uruchamiamy my; żaden z agentów ich nie uruchami
    `clocks_throttle_reasons.active`, użyj `clocks_event_reasons.active`.
 5. Na czas kampanii: nic dużego w sieci LAN (aktualizacje, kopiowanie), karty nie współdzielone z innymi
    programami GPU, komputery nie przechodzą w uśpienie (`powercfg /change standby-timeout-ac 0`).
+6. Lista kontrolna laptopa (HyperX_Zuber) przed każdą serią pomiarów. W kampanii TTT laptop liczył w sesji 1 ok. 3,06 M
+   ocen/s, a w sesji 2 ok. 4,61 M ocen/s; przyczyną były najpewniej ustawienia zasilania, nie sieć.
+   - podłączony zasilacz (`standby-timeout-ac` działa tylko na zasilaniu sieciowym);
+   - tryb zasilania Windows „Najlepsza wydajność” (Ustawienia → System → Zasilanie);
+   - w aplikacji producenta (jeśli jest) najwyższy profil wydajności, grafika dedykowana (nie hybrydowa ani oszczędna);
+   - nikt na nim nie pracuje i nie działają inne ciężkie procesy; laptop otwarty lub na podstawce, żeby się nie przegrzewał;
+   - po pierwszym przebiegu z laptopem: mediana `evals_per_s` w jego `run_r<rank>.csv` powinna wynosić ok. 4,5 M/s;
+     ok. 3 M/s oznacza tryb oszczędzania – popraw ustawienia przed dalszymi pomiarami.
 
 ## 1. Rysunki i tabela instancji (lokalnie)
 
