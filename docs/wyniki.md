@@ -227,11 +227,111 @@ Obserwacje:
 - Luka jakości względem SABRE (QFT ok. 3–4×, QAOA ok. 1,3–1,5×) wynika z naiwnego routera zachłannego (ADR 0007),
   nie z czasu przebiegu.
 
+## Iteracja I – kampania TTT V0 (2026-11-22 – 2026-11-24)
+
+Konfiguracja: 4 konfiguracje węzłów × 4 instancje × 10 powtórzeń = 160 przebiegów po 120 s, migracja `adaptiveB`,
+topologia `all`, populacje jak w pilotażu (5080 / 5070 Laptop / 3060: 262 144 / 65 536 / 131 072), progi T_ε z
+pilotażu (wszystkie trzy progi w jednym przebiegu). To samo ziarno dla danego powtórzenia we wszystkich konfiguracjach
+(porównanie sparowane). Wszystkie 160 przebiegów ma `summary.json` i przeszło `validate-runs` (CheckMap, test
+strukturalny, statevector, k = 1). Jeden przebieg (`rtx5080+rtx5070/qaoa_n16/rep5`) powtórzono po błędzie
+uruchomienia (`mpiexec` nie połączył się z lokalnym `smpd`), zob. dziennik decyzji. Kampania odbyła się w dwóch sesjach
+(powtórzenia 1–4: 2026-11-22, 5–10: 2026-11-23). Źródła: `results/runs`, `results/aggregate.csv`, `results/quality.csv`,
+wykresy `results/plots/ttt_ecdf_<instancja>_<eps>.png` i `convergence_runs_rtx5080+rtx5070+rtx3060_qft_n20_rep1.png`.
+
+Mediana TTT jest dolną medianą z cenzurowaniem (porażki = +∞), więc „–” oznacza mniej niż 5 sukcesów na 10.
+Komórka: liczba sukcesów w 120 s; mediana TTT [s].
+
+| Instancja | ε | T | rtx5080 | rtx5080+rtx3060 | rtx5080+rtx5070 | rtx5080+rtx5070+rtx3060 |
+|---|---|---|---|---|---|---|
+| qaoa_n16 | 0,02 | 28 | 7/10; 63,3 | 5/10; 118,9 | 2/10; – | 3/10; – |
+| qaoa_n16 | 0,05 | 29 | 8/10; 58,7 | 5/10; 63,3 | 3/10; – | 4/10; – |
+| qaoa_n16 | 0,10 | 30 | 8/10; 51,6 | 7/10; 58,5 | 4/10; – | 6/10; 13,3 |
+| qaoa_n24 | 0,02 | 53 | 3/10; – | 2/10; – | 4/10; – | 2/10; – |
+| qaoa_n24 | 0,05 | 54 | 4/10; – | 2/10; – | 5/10; 102,3 | 5/10; 102,3 |
+| qaoa_n24 | 0,10 | 57 | 7/10; 67,0 | 9/10; 46,8 | 8/10; 43,4 | 7/10; 24,1 |
+| qft_n12 | 0,02 | 153 | 8/10; 35,4 | 8/10; 14,8 | 9/10; 20,0 | 7/10; 22,9 |
+| qft_n12 | 0,05 | 158 | 9/10; 14,6 | 10/10; 4,4 | 10/10; 2,9 | 10/10; 5,1 |
+| qft_n12 | 0,10 | 165 | 10/10; 1,6 | 10/10; 1,0 | 10/10; 0,7 | 10/10; 0,7 |
+| qft_n20 | 0,02 | 668 | 0/10; – | 2/10; – | 0/10; – | 1/10; – |
+| qft_n20 | 0,05 | 687 | 5/10; 94,4 | 6/10; 73,3 | 5/10; 73,6 | 9/10; 28,4 |
+| qft_n20 | 0,10 | 720 | 10/10; 6,1 | 10/10; 8,1 | 10/10; 2,3 | 10/10; 2,5 |
+
+Przyspieszenie S względem samego RTX 5080 (mediana do mediany) i w nawiasie efektywność heterogeniczna
+E = S / (przepustowość konfiguracji / przepustowość 5080); „–”, gdy którakolwiek mediana jest nieokreślona:
+
+| Instancja | ε | rtx5080+rtx3060 | rtx5080+rtx5070 | rtx5080+rtx5070+rtx3060 |
+|---|---|---|---|---|
+| qaoa_n16 | 0,02 | 0,53 (0,38) | – | – |
+| qaoa_n16 | 0,05 | 0,93 (0,65) | – | – |
+| qaoa_n16 | 0,10 | 0,88 (0,62) | – | 3,88 (1,84) |
+| qaoa_n24 | 0,02 | – | – | – |
+| qaoa_n24 | 0,05 | – | – | – |
+| qaoa_n24 | 0,10 | 1,43 (1,02) | 1,54 (0,93) | 2,78 (1,31) |
+| qft_n12 | 0,02 | 2,38 (1,63) | 1,76 (1,01) | 1,54 (0,70) |
+| qft_n12 | 0,05 | 3,32 (2,27) | 4,99 (2,86) | 2,86 (1,31) |
+| qft_n12 | 0,10 | 1,71 (1,17) | 2,35 (1,34) | 2,37 (1,08) |
+| qft_n20 | 0,02 | – | – | – |
+| qft_n20 | 0,05 | 1,29 (0,91) | 1,28 (0,77) | 3,33 (1,58) |
+| qft_n20 | 0,10 | 0,76 (0,53) | 2,60 (1,57) | 2,48 (1,18) |
+
+Przepustowość całej konfiguracji (suma po rankach średnich `evals_per_s`, zakres po instancjach): 5080 4,9–5,9 mln/s,
+5080+3060 7,0–8,4 mln/s, 5080+5070 8,1–10,0 mln/s, wszystkie trzy 10,3–12,5 mln/s, czyli ok. 1,4 / 1,7 / 2,1 ×
+przepustowości samego 5080.
+
+Przepustowość na rank (mediana `evals_per_s` z `run_r*.csv`) w obu sesjach:
+
+| Węzeł | Sesja 1 (rep 1–4) | Sesja 2 (rep 5–10) |
+|---|---|---|
+| RTX 5080 | 5,68 mln/s | 5,67 mln/s |
+| RTX 3060 | 2,28 mln/s | 2,22 mln/s |
+| RTX 5070 Laptop | 3,06 mln/s | 4,61 mln/s |
+
+Jakość (najlepszy wynik GA w całej kampanii wobec SABRE z `results/baseline/sabre.csv`):
+
+| Instancja | GA (min) | SABRE min / mediana | GA / SABRE min |
+|---|---|---|---|
+| qaoa_n16 | 26 | 19 / 20 | 1,37 |
+| qaoa_n24 | 51 | 35 / 41 | 1,46 |
+| qft_n12 | 150 | 51 / 53 | 2,94 |
+| qft_n20 | 668 | 170 / 177 | 3,93 |
+
+Obserwacje:
+- **Trzy węzły skracają TTT 2,4–3,9× przy progach ε = 0,10 i 0,05** (tam, gdzie mediany są określone), przy ok. 2,1×
+  większej przepustowości. Dla qft_n20 przy ε = 0,05 rośnie też częstość sukcesu (5/10 → 9/10). Efektywność > 1
+  (do 1,8) nie oznacza, że jedna ocena jest tańsza: model wyspowy przeszukuje inaczej (kilka niezależnych populacji
+  i migracja), więc TTT nie jest proporcjonalne do liczby ocen. Przy n = 10 i dwumodalnym rozkładzie TTT
+  pojedyncze wartości S są bardzo niepewne – wyższy kwartyl jest często nieokreślony (`aggregate.csv`).
+- **Próg ε = 0,02 jest dla V0 za ostry:** mediana jest określona tylko dla qft_n12 i qaoa_n16, a qft_n20 osiąga go
+  0–2 razy na 10 w każdej konfiguracji. Dla tego progu właściwą miarą jest częstość sukcesu; żadna konfiguracja nie
+  poprawia jej systematycznie.
+- **Dołożenie węzła nie zawsze pomaga.** 5080+3060 jest wolniejsze od samego 5080 dla qaoa_n16 (S = 0,53–0,93)
+  i qft_n20 przy ε = 0,10 (S = 0,76). 5080+5070 dla qaoa_n16 osiąga próg rzadziej niż sam 5080 (2–4 wobec 7–8 na 10).
+  Hipoteza (niesprawdzona): wyspa laptopa ma najmniejszą populację i wykonuje ok. 3× więcej generacji niż 5080
+  (np. 8000 wobec 2600 w 120 s), a migracja `all` rozsyła jej najlepszego osobnika do pozostałych wysp, co przyspiesza
+  przedwczesną zbieżność obserwowaną już w pilotażu. Do sprawdzenia: porównanie topologii `ring` / interwału migracji
+  albo równych populacji.
+- **Laptop liczył w sesji 2 ok. 50 % szybciej niż w sesji 1** (3,06 → 4,61 mln/s), a 5080 i 3060 tak samo w obu
+  sesjach. Sesja 1 zgadza się z pilotażem i przebiegiem 120 s z pomiarów węzłów (ok. 3,3 mln/s; laptop był wtedy
+  używany), sesja 2 – z przemiataniem `bench-node` (4,3–4,7 mln/s). Ponieważ ok. 89 % czasu generacji to operatory GA
+  na CPU hosta, różnica wynika najpewniej z ustawień zasilania laptopa (zasilacz, tryb wydajności), a nie z sieci.
+  Logów `nvidia-smi` z kampanii nie zebrano (plik z 2026-11-22 obejmuje tylko 1 minutę testu), więc nie da się tego
+  potwierdzić. Kampanii nie powtarzamy (zob. dziennik decyzji); przed kolejnymi pomiarami obowiązuje lista kontrolna
+  z `kampania-iteracja-1.md`.
+- **Luka jakości względem SABRE się nie zmienia** (QAOA 1,4–1,5×, QFT 2,9–3,9×), bo wynika z naiwnego routera
+  (ADR 0007), nie z liczby węzłów. Najlepsze wyniki kampanii są bliskie B z pilotażu (qaoa_n16 26 < 27; qft_n20 668
+  > 654, bo przebiegi trwały 120 s zamiast 300 s).
+
+Zagrożenia trafności: dwie sesje (inny stan zasilania laptopa, inna karta sieciowa laptopa – opóźnienie MPI 4× niższe
+w sesji 2, przy komunikacji < 1 % czasu); n = 10 na komórkę; progi wyznaczone z 3 przebiegów pilotażu tylko na
+konfiguracji 3-hostowej; populacje dobrane per węzeł, więc „dołożenie węzła” zmienia też łączną populację.
+
 ## Kandydaci do optymalizacji
 
 **Żaden z poniższych punktów nie jest zaimplementowany w v1.** To lista pomysłów do sprawdzenia po profilowaniu,
 w kolejności wynikającej z wyników, a nie z tej listy.
 
+- Topologia / interwał migracji przy niejednorodnych wyspach (szybka wyspa z małą populacją może narzucać swoje
+  rozwiązanie pozostałym; zob. qaoa_n16 w kampanii TTT V0).
 - Lookahead w routerze (uwzględnienie kilku kolejnych bramek 2q przy wyborze SWAP) – mniej SWAP, droższy fitness.
 - Zachowanie różnorodności populacji i restart przy stagnacji (np. restart wyspy po N generacjach bez poprawy,
   niszowanie, większa mutacja przy stagnacji) – przeciw przedwczesnej zbieżności.
