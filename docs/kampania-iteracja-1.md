@@ -66,7 +66,7 @@ programu. Wszystkie polecenia uruchamiamy my; żaden z agentów ich nie uruchami
    - tryb zasilania Windows „Najlepsza wydajność” (Ustawienia → System → Zasilanie);
    - w aplikacji producenta (jeśli jest) najwyższy profil wydajności, grafika dedykowana (nie hybrydowa ani oszczędna);
    - nikt na nim nie pracuje i nie działają inne ciężkie procesy; laptop otwarty lub na podstawce, żeby się nie przegrzewał;
-   - po pierwszym przebiegu z laptopem: mediana `evals_per_s` w jego `run_r<rank>.csv` powinna wynosić ok. 4,5 M/s;
+   - po pierwszym przebiegu z laptopem: mediana `evals_per_s` w jego `run_r<rank>.csv` powinna wynosić ok. 4,5 M/s (dla qaoa_n16/qaoa_n24; dłuższe obwody liczą się wolniej, np. qft_n27 ok. 2,9 M/s);
      ok. 3 M/s oznacza tryb oszczędzania – popraw ustawienia przed dalszymi pomiarami.
 
 ## 1. Rysunki i tabela instancji (lokalnie)

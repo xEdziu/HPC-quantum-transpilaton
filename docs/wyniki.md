@@ -325,6 +325,46 @@ Zagrożenia trafności: dwie sesje (inny stan zasilania laptopa, inna karta siec
 w sesji 2, przy komunikacji < 1 % czasu); n = 10 na komórkę; progi wyznaczone z 3 przebiegów pilotażu tylko na
 konfiguracji 3-hostowej; populacje dobrane per węzeł, więc „dołożenie węzła” zmienia też łączną populację.
 
+## Iteracja I – jakość względem SABRE (2026-11-24)
+
+Konfiguracja: wszystkie 3 węzły (`rtx5080+rtx5070+rtx3060`), jeden przebieg 120 s na instancję, ziarno 1, bez celu
+(`--target -1`), migracja `adaptiveB`, topologia `all`, populacje jak w kampanii. Wszystkie 12 wyników przechodzi
+`validate-runs`. SABRE: minimum i mediana po 10 ziarnach z `results/baseline/sabre.csv`.
+Dane: `results/quality-agg/quality.csv`, `results/quality-agg/aggregate.csv` (przepustowość).
+
+| Instancja | GA (120 s) | SABRE min / mediana | GA / SABRE min | Przepustowość [mln ocen/s] | Laptop [mln/s] |
+|---|---|---|---|---|---|
+| qaoa_n8 | 8 | 6 / 6 | 1,33 | 13,4 | 4,91 |
+| qaoa_n12 | 19 | 13 / 14 | 1,46 | 13,0 | 4,77 |
+| qaoa_n16 | 27 | 19 / 20 | 1,42 | 12,6 | 4,67 |
+| qaoa_n20 | 42 | 28 / 32 | 1,50 | 12,3 | 4,62 |
+| qaoa_n24 | 58 | 35 / 41 | 1,66 | 12,4 | 4,61 |
+| qaoa_n26 | 44 | 36 / 42 | 1,22 | 12,3 | 4,48 |
+| qft_n8 | 48 | 17 / 18 | 2,82 | 12,8 | 4,74 |
+| qft_n12 | 150 | 51 / 53 | 2,94 | 12,0 | 4,41 |
+| qft_n16 | 342 | 100 / 106,5 | 3,42 | 11,2 | 4,07 |
+| qft_n20 | 672 | 170 / 177 | 3,95 | 10,5 | 3,88 |
+| qft_n24 | 1134 | 250 / 258,5 | 4,54 | 9,0 | 3,28 |
+| qft_n27 | 1594 | 341 / 349 | 4,67 | 7,9 | 2,91 |
+
+Obserwacje:
+- **GA V0 nie dorównuje SABRE na żadnej instancji.** Dla QAOA luka wynosi 1,2–1,7×, dla QFT 2,8–4,7× i rośnie
+  z rozmiarem obwodu. To skutek naiwnego routera zachłannego (ADR 0007): GA optymalizuje tylko layout początkowy,
+  a router przesuwa zawsze kubit `a` po najkrótszej ścieżce bez patrzenia na kolejne bramki. QFT ma pary CX między
+  wszystkimi kubitami, więc żaden layout nie ratuje zachłannego routingu; QAOA na grafie 3-regularnym ma mniej
+  i bardziej lokalnych par. Wyniki zgadzają się z kampanią i pilotażem (qft_n12 150 jak w kampanii, qaoa_n16 27 wobec
+  26 w kampanii przy 40 przebiegach), więc pojedynczy przebieg wystarcza do porównania rzędu wielkości.
+- qaoa_n26 ma mniej SWAP-ów niż qaoa_n24 (44 wobec 58) i najmniejszą lukę – instancje QAOA to różne losowe grafy,
+  więc liczba SWAP nie musi rosnąć monotonicznie z n.
+- **Przepustowość spada z długością obwodu** (13,4 → 7,9 mln ocen/s od qaoa_n8 do qft_n27), bo koszt oceny rośnie
+  z liczbą bramek 2q. Dotyczy to też laptopa (4,9 → 2,9 mln/s), więc próg z listy kontrolnej (ok. 4,5 mln/s) odnosi
+  się do instancji kampanii (qaoa_n16, qaoa_n24); dla qft_n24/n27 niższa wartość nie oznacza trybu oszczędzania.
+- Wniosek do iteracji II: poprawa jakości wymaga zmiany routera (lookahead), a nie większej mocy obliczeniowej –
+  luka nie maleje mimo ok. 1–1,6 mld ocen na instancję.
+
+Zagrożenia trafności: jeden przebieg na instancję (bez rozrzutu); SABRE to 10 krótkich przebiegów CPU (10 ziaren),
+a GA – 120 s na 3 GPU – porównanie dotyczy jakości wyniku, nie kosztu.
+
 ## Kandydaci do optymalizacji
 
 **Żaden z poniższych punktów nie jest zaimplementowany w v1.** To lista pomysłów do sprawdzenia po profilowaniu,
