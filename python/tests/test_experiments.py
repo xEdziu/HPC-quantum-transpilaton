@@ -101,6 +101,16 @@ def test_censored_median():
     assert ex.censored_median([5, 1, 3, 2, 4], 5) == 3
 
 
+def test_censored_quartiles_ordered():
+    # 5 of 10 succeeded: q1 = 3rd, median = 5th, q3 = 8th (censored)
+    ok = [10, 20, 30, 40, 118]
+    assert ex.censored_quantile(ok, 10, 0.25) == 30
+    assert ex.censored_quantile(ok, 10, 0.5) == 118
+    assert math.isnan(ex.censored_quantile(ok, 10, 0.75))
+    # sorted 2,3,4,8,9: q1 = 2nd (ceil(1.25)), q3 = 4th (ceil(3.75))
+    assert ex.censored_quantile([4, 2, 3, 9, 8], 5, 0.25) == 3 and ex.censored_quantile([4, 2, 3, 9, 8], 5, 0.75) == 8
+
+
 def test_load_runs_multi_target_censoring(tmp_path):
     targets = {("qft_n8", "eps0.10"): 12, ("qft_n8", "eps0.05"): 11, ("qft_n8", "eps0.02"): 10}
     # two reps of one config; rep2 never reaches the strictest target
@@ -152,7 +162,8 @@ def test_aggregate_speedup_and_efficiency():
     two = agg.loc["rtx5080+rtx3060"]
     assert two["success_rate"] == pytest.approx(0.6)
     assert two["median_ttt_s"] == 3
-    assert (two["q1_ttt_s"], two["q3_ttt_s"]) == (1.5, 2.5)
+    assert two["q1_ttt_s"] == 2  # 2nd of 5 (ceil(0.25*5))
+    assert math.isnan(two["q3_ttt_s"])  # 4th of 5 is censored
     assert two["speedup"] == pytest.approx(4 / 3)
     assert two["efficiency"] == pytest.approx((4 / 3) / 1.5)
     assert math.isnan(agg.loc["rtx5080+rtx5070", "median_ttt_s"])  # 1 of 5 succeeded
