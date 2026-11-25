@@ -398,7 +398,9 @@ NCU_METRICS = [  # (metric, column) -- ncu --set full names, values as reported 
     ("gpu__time_duration.sum", "duration_ns"),
     ("sm__throughput.avg.pct_of_peak_sustained_elapsed", "sm_throughput_pct"),
     ("gpu__compute_memory_throughput.avg.pct_of_peak_sustained_elapsed", "memory_throughput_pct"),
-    ("dram__throughput.avg.pct_of_peak_sustained_elapsed", "dram_throughput_pct"),
+    ("l1tex__throughput.avg.pct_of_peak_sustained_active", "l1_throughput_pct"),
+    ("lts__throughput.avg.pct_of_peak_sustained_elapsed", "l2_throughput_pct"),
+    ("gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed", "dram_throughput_pct"),
     ("sm__warps_active.avg.pct_of_peak_sustained_active", "achieved_occupancy_pct"),
     ("sm__maximum_warps_per_active_cycle_pct", "theoretical_occupancy_pct"),
     ("launch__registers_per_thread", "registers_per_thread"),
@@ -414,6 +416,12 @@ NCU_METRICS = [  # (metric, column) -- ncu --set full names, values as reported 
     ("smsp__sass_inst_executed_op_global_ld.sum", "global_load_inst"),
     ("smsp__sass_inst_executed_op_shared_ld.sum", "shared_load_inst"),
     ("smsp__inst_executed.sum", "instructions"),
+    ("l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum", "global_load_requests"),
+    ("l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum", "global_load_sectors"),
+    ("l1tex__t_sectors_pipe_lsu_mem_local_op_ld.sum", "local_load_sectors"),
+    ("l1tex__t_sectors_pipe_lsu_mem_local_op_st.sum", "local_store_sectors"),
+    ("lts__t_sectors_srcunit_tex_op_read.sum", "l2_read_sectors_from_l1"),
+    ("lts__t_sectors_srcunit_tex_op_write.sum", "l2_write_sectors_from_l1"),
 ]
 STALL_PREFIX = "smsp__pcsamp_warps_issue_stalled_"
 BREAKDOWN_PARTS = ["ga_operators", "fitness_h2d", "fitness_kernel", "fitness_d2h", "evaluate_other", "mpi_migrate"]
@@ -623,10 +631,10 @@ def cmd_prof_plot(a):
         names = {h.get("hostname", h["name"]).lower(): h["gpu"] for h in cluster["hosts"]}
         nc.insert(1, "gpu", [names.get(s.split("_", 1)[1].lower(), s) for s in nc["report"]])
         nc.to_csv(out / "prof_ncu.csv", index=False)
-        cols = [("sm_throughput_pct", "SM\nthroughput"), ("memory_throughput_pct", "memory\nthroughput"),
-                ("achieved_occupancy_pct", "achieved\noccupancy"), ("issue_active_pct", "issue\nactive"),
-                ("l1_hit_pct", "L1\nhit rate")]
-        fig, ax = plt.subplots(figsize=(9, 3.6))
+        cols = [("sm_throughput_pct", "SM\nthroughput"), ("l1_throughput_pct", "L1\nthroughput"),
+                ("l2_throughput_pct", "L2\nthroughput"), ("dram_throughput_pct", "DRAM\nthroughput"),
+                ("achieved_occupancy_pct", "achieved\noccupancy"), ("issue_active_pct", "issue\nactive")]
+        fig, ax = plt.subplots(figsize=(10, 3.6))
         w = 0.8 / len(nc)
         x = np.arange(len(cols))
         for i, (_, row) in enumerate(nc.iterrows()):

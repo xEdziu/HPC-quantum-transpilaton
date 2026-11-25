@@ -40,7 +40,8 @@ Liczby i wnioski są opisane w [wyniki.md](wyniki.md) (sekcje „Iteracja I – 
     Podział czasu: **89–92 % czasu generacji to operatory GA na CPU** – główne wąskie gardło V0.
   - Profil Nsight V0 (tabele w [wyniki.md](wyniki.md), sekcja „profil V0”): zestawienia
     `results/prof/stats_*.csv`. Operatory hosta to 87–92 % generacji, kopie 1–2 %, MPI poniżej 0,2 %. Kernel jest
-    ograniczony potokiem pamięci L1/LSU (pamięć lokalna `l2p`/`p2l`, tabele w pamięci globalnej). Wykresy
+    ograniczony przepustowością L2 (RTX 50xx) lub L1 (RTX 3060): zapisy pamięci lokalnej `l2p`/`p2l`, nieskoalesowane
+    odczyty globalne. Wykresy
     `results/plots/prof_*.png`, opis, podpisy i gotowy akapit z wnioskiem:
     [profil-v0-dla-sprawozdania.md](profil-v0-dla-sprawozdania.md).
   - Zegar, moc, temperatura GPU: `results/plots/bench_nvsmi_<host>.png`.
@@ -74,7 +75,7 @@ Tabela z [adr/README.md](adr/README.md) i [dziennik-decyzji.md](dziennik-decyzji
 
 ## Jeszcze brakuje
 
-- Dwa zrzuty z GUI Nsight Compute (Roofline, widok Source):
+- Trzy zrzuty z GUI Nsight Compute (Speed Of Light, Memory Chart, widok Source; Roofline nie ma zastosowania):
   [profil-v0-dla-sprawozdania.md](profil-v0-dla-sprawozdania.md), ostatnia sekcja. Pozostałe widoki zastępują
   wykresy `prof-plot`.
 
@@ -89,4 +90,4 @@ Compress-Archive -Force -Path results\figures, results\plots, results\bench, res
 ```
 
 Przykładowy przebieg (`rtx5080/qft_n12/rep1`) daje wzór `summary.json` i logu `run_r0.csv`. Wykresy profilu są w
-`results\plots\prof_*.png`, a dwa zrzuty z GUI Nsight Compute trafiają do `results\figures`.
+`results\plots\prof_*.png`, a trzy zrzuty z GUI Nsight Compute trafiają do `results\figures`.

@@ -18,8 +18,8 @@ krok 7. Znane problemy narzędzi: [profilowanie.md](profilowanie.md).
    V0.**
 2. Kopie danych między CPU a GPU zajmują 1–2 % czasu generacji, a komunikacja MPI między komputerami poniżej 0,2 %.
    Rozproszenie na 3 komputery prawie nic nie kosztuje komunikacyjnie.
-3. Sam kernel oceny (fitness) jest ograniczony dostępem do pamięci podręcznej L1 (pamięć lokalna wątków i tablice
-   w pamięci globalnej), a nie obliczeniami. Przyspieszanie go ma jednak sens dopiero po przyspieszeniu operatorów
+3. Sam kernel oceny (fitness) jest ograniczony przepustowością pamięci podręcznych (L2 na kartach RTX 50xx, L1
+   na RTX 3060), a nie obliczeniami. Główną przyczyną są zapisy tablic mapowania w pamięci lokalnej wątków. Przyspieszanie go ma jednak sens dopiero po przyspieszeniu operatorów
    na CPU: nawet nieskończenie szybki kernel skróciłby generację na RTX 5080 najwyżej 1,09×.
 
 ## Co zmierzyliśmy (do sekcji 2.5 „Narzędzia profilowania”)
@@ -54,7 +54,7 @@ uv run python -m qmap.experiments prof-plot
 ```
 
 Pliki trafiają do `results\plots`. Wykresy zastępują większość zrzutów ekranu z GUI z listy w
-[kampania-iteracja-1.md](kampania-iteracja-1.md), krok 8. Z GUI zostają tylko dwa zrzuty, opisane na końcu.
+[kampania-iteracja-1.md](kampania-iteracja-1.md), krok 8. Z GUI zostają tylko trzy zrzuty, opisane na końcu.
 
 ### `prof_breakdown.png` + `prof_breakdown.csv` – podział czasu generacji (sekcja 3.3)
 
@@ -130,38 +130,43 @@ i odebranych migrantów w czasie.”
 **Co pokazuje:** dla każdej karty słupki „procent maksimum” dla:
 
 - przepustowości SM (obliczenia);
-- przepustowości pamięci;
+- przepustowości pamięci podręcznych L1 i L2 oraz pamięci DRAM;
 - osiągniętej zajętości multiprocesorów;
-- aktywności wydawania instrukcji;
-- trafień w pamięć podręczną L1.
+- aktywności wydawania instrukcji.
 
-`prof_ncu.csv` ma pełną listę metryk: rejestry, IPC, liczby instrukcji pamięci, najczęstsze przyczyny przestojów
-warpów.
+`prof_ncu.csv` ma pełną listę metryk: rejestry, IPC, liczby instrukcji i sektorów pamięci, trafienia L1/L2,
+najczęstsze przyczyny przestojów warpów.
 
 | Metryka | RTX 5080 | RTX 3060 | RTX 5070 Laptop |
 |---|---:|---:|---:|
 | przepustowość SM | 14,6 % | 20,3 % | 19,1 % |
-| przepustowość pamięci | 91,8 % | 73,6 % | 94,8 % |
+| przepustowość L1 | 62,2 % | **87,8 %** | 81,0 % |
+| przepustowość L2 | **91,8 %** | 73,6 % | **94,8 %** |
+| przepustowość DRAM | 1,3 % | 27,1 % | 0,2 % |
 | zajętość osiągnięta (teoretyczna 100 %) | 85 % | 94 % | 90 % |
 | aktywne wątki w warpie (z 32) | 19,3 | 19,3 | 19,3 |
 | trafienia L1 / L2 | 90 / 99 % | 80 / 100 % | 92 / 100 % |
-| główne przestoje | oczekiwanie na pamięć (`long_scoreboard`), przepełniona kolejka L1 (`lg_throttle`) | to samo | to samo |
+| główne przestoje | oczekiwanie na dane z L1/L2 (`long_scoreboard`) i przepełniona kolejka instrukcji pamięci (`lg_throttle`), razem 95 % próbek | to samo | to samo |
 
 **Jak czytać:**
 
-- Pamięć jest wykorzystana prawie w 100 %, a jednostki obliczeniowe w 15–20 %. Kernel jest więc ograniczony
-  pamięcią, a nie obliczeniami.
-- Trafienia w cache są bardzo wysokie, więc nie chodzi o pamięć DRAM karty, tylko o sam potok pamięci L1.
+- Jedna z pamięci podręcznych pracuje na 88–95 % możliwości (L2 na RTX 5080 i 5070, L1 na RTX 3060), a
+  jednostki obliczeniowe na 15–20 %. Kernel jest więc ograniczony pamięcią, a nie obliczeniami.
+- Na kartach RTX 50xx pamięć DRAM jest prawie nieużywana (0,2–1,3 %): wszystko mieści się w cache, a problemem
+  jest sama przepustowość L1/L2. RTX 3060 ma znacznie mniejszą pamięć L2, więc część ruchu trafia tam do DRAM
+  (27 %), ale i tak ogranicza L1.
 - Przyczyny w kodzie:
-  - każdy wątek trzyma swoje tablice mapowania (`l2p`, `p2l`) w pamięci lokalnej, która fizycznie leży w L1/L2:
-    16,5 mln odczytów i 19,5 mln zapisów na wywołanie;
-  - tablice odległości i następnego kroku (`dist`, `next_hop`) są czytane z pamięci globalnej zamiast ze
-    współdzielonej.
+  - każdy wątek trzyma swoje tablice mapowania (`l2p`, `p2l`) w pamięci lokalnej. Zapisy do niej L1 przepuszcza
+    do L2: ok. 4,6 GB zapisów na jedno wywołanie kernela, czyli 89 % całego ruchu L2;
+  - odczyty z pamięci globalnej (populacja oraz tablice `dist`, `next_hop`) są nieskoalesowane: wątki w warpie
+    czytają rozrzucone adresy (8,5 sektora na żądanie). `ncu` wylicza, że z 32 bajtów pobranego sektora wątek
+    wykorzystuje średnio 1,7;
+  - tablice routera nie są w pamięci współdzielonej.
 - 19,3 z 32 aktywnych wątków w warpie oznacza rozbieżność wątków: różne osobniki wymagają różnej liczby SWAP-ów,
   więc pętla routera kończy się w różnym momencie.
 
-**Proponowany podpis:** „Kernel oceny w Nsight Compute: wysokie wykorzystanie potoku pamięci przy niskim
-wykorzystaniu jednostek obliczeniowych (kernel ograniczony pamięcią).”
+**Proponowany podpis:** „Kernel oceny w Nsight Compute: wysokie wykorzystanie pamięci podręcznych L1/L2 przy niskim
+wykorzystaniu jednostek obliczeniowych (kernel ograniczony przepustowością pamięci podręcznych).”
 
 ## Wniosek do sekcji 3.3 (wąskie gardło i decyzja)
 
@@ -171,9 +176,10 @@ Gotowy akapit do przeredagowania:
 > zajmują 85–92 % czasu generacji (72–90 % w przebiegu na trzech komputerach), a GPU przez ten czas pozostaje
 > bezczynne. Kopie danych CPU↔GPU to 1–2 % czasu generacji, a obsługa migracji MPI – poniżej 0,2 %. Zgodnie z prawem
 > Amdahla nawet nieskończenie szybka ocena na GPU skróciłaby generację na RTX 5080 najwyżej 1,09×, podczas gdy
-> usunięcie kosztu operatorów na CPU dawałoby do 12×. Kernel oceny jest ograniczony potokiem pamięci (Nsight Compute:
-> 74–95 % przepustowości pamięci przy 15–20 % przepustowości obliczeniowej) z powodu tablic w pamięci lokalnej
-> wątków i odczytów tablic routera z pamięci globalnej. **Decyzja:** w iteracji II w pierwszej kolejności
+> usunięcie kosztu operatorów na CPU dawałoby do 12×. Kernel oceny jest ograniczony przepustowością pamięci
+> podręcznych (Nsight Compute: L2 92–95 % na kartach RTX 50xx, L1 88 % na RTX 3060, przy 15–20 % przepustowości
+> obliczeniowej; DRAM 0,2–1,3 % na RTX 50xx i 27 % na RTX 3060). Główną przyczyną są zapisy tablic mapowania w pamięci lokalnej wątków (89 % ruchu
+> L2), a drugą nieskoalesowane odczyty z pamięci globalnej. **Decyzja:** w iteracji II w pierwszej kolejności
 > przyspieszamy operatory GA (najpierw dokładniejsze zakresy NVTX dla selekcji, krzyżowania i mutacji, potem
 > zrównoleglenie lub przeniesienie na GPU), a optymalizacje kernela i kopii odkładamy na kolejne iteracje.
 
@@ -195,7 +201,7 @@ Do rejestru ADR / tabeli V→V+1 (sekcja 6):
 - `nsys` działał bez uprawnień administratora, więc bez próbkowania CPU. Operatorów na CPU nie rozbijamy jeszcze na
   poszczególne funkcje; to pierwszy krok iteracji II.
 
-## Dwa zrzuty z GUI (sekcja 2.5 – „zrzuty z narzędzi”)
+## Trzy zrzuty z GUI (sekcja 2.5 – „zrzuty z narzędzi”)
 
 Tych widoków nie da się sensownie odtworzyć wykresem. Raporty leżą na AMG-NORTH w
 `E:\mgr\sem2\HPC-quantum-transpilaton\results\prof`.
@@ -206,21 +212,53 @@ Otwarcie Nsight Compute (zwykłe okno PowerShell):
 & 'C:\Program Files\NVIDIA Corporation\Nsight Compute 2025.2.1\host\windows-desktop-win7-x64\ncu-ui.exe' E:\mgr\sem2\HPC-quantum-transpilaton\results\prof\ncu_AMG-NORTH.ncu-rep
 ```
 
-1. **Roofline** (`fig_ncu_roofline_rtx5080.png`):
-   - zakładka **Details**;
-   - rozwiń sekcję **GPU Speed Of Light Roofline Chart**;
-   - zrzut samego wykresu (Win+Shift+S).
+1. **Speed Of Light** (`fig_ncu_sol_rtx5080.png`):
+   - zakładka (Page) **Details**; lista sekcji po prawej nie może być ustawiona na **All**, bo wtedy rozwijają się
+     wszystkie sekcje;
+   - zwiń wszystkie sekcje oprócz **GPU Speed Of Light Throughput**; wykres tej sekcji ustawiony na
+     **GPU Throughput Chart** (lista po prawej stronie nagłówka);
+   - zrzut od nagłówka sekcji do końca wykresu słupkowego (Win+Shift+S).
 
-   Na wykresie kropka kernela leży daleko pod dachem obliczeniowym, po stronie ograniczenia pamięcią.
-2. **Source** (`fig_ncu_source_rtx5080.png`):
-   - zakładka **Source**;
-   - u góry wybierz widok **Source and SASS** albo samo **Source**;
-   - kliknij nagłówek kolumny **Warp Stall Sampling (All Samples)**, żeby posortować malejąco;
-   - zrzut kilkunastu górnych linii.
+   Widać na nim przepustowość: Compute (SM) 14,6 %, L1 62,2 %, L2 91,8 % (równa `Memory Throughput`), DRAM 1,3 %.
+   Kernel jest więc ograniczony przez L2, a nie obliczenia czy DRAM.
+2. **Memory Chart** (`fig_ncu_memory_rtx5080.png`):
+   - rozwiń sekcję **Memory Workload Analysis** (lista po prawej stronie jej nagłówka: **Memory Chart**);
+   - zrzut schematu z blokami Kernel → L1/TEX Cache → L2 Cache → Device Memory.
 
-   Najgorętsze linie są w pętli routera `count_swaps` (odczyty `dist`/`next_hop` i aktualizacja `l2p`/`p2l`).
+   Widać ruch między poziomami pamięci: gruby strumień zapisów L1 → L2 (ok. 4,6 GB na wywołanie; zapisy pamięci
+   lokalnej `l2p`/`p2l`) i znikomy ruch do pamięci urządzenia.
 
-Zapisz oba pliki w `results\figures`.
+Roofline pomijamy celowo. Wykresy Roofline w Nsight Compute liczą operacje zmiennoprzecinkowe (FP16/FP32/FP64),
+a router w kernelu wykonuje wyłącznie operacje na liczbach całkowitych. `ncu` raportuje 0 % szczytu FP32 i FP64,
+więc na wykresie nie ma punktu kernela. Do sprawozdania wystarczy jedno zdanie: „Analiza Roofline nie ma
+zastosowania, ponieważ kernel nie wykonuje operacji zmiennoprzecinkowych; ograniczenie wskazuje sekcja Speed Of
+Light.”
+3. **Source** (`fig_ncu_source_rtx5080.png`; dodatkowo `fig_ncu_source_kernel_rtx5080.png`):
+   - zakładka **Source**, widok **Source**;
+   - na liście **Source** wybierz plik z funkcją `route` (router) albo `gpu_fitness.cu` (sam kernel);
+   - zrzut fragmentu z liczbami w kolumnach **Warp Stall Sampling (All Samples)** i **Instructions Executed**.
+
+   Rozkład próbek przestojów warpów w pętli routera `route` (RTX 5080):
+
+   | Linia | Kod | Przestoje warpów | Uwagi `ncu` |
+   |---|---|---:|---|
+   | 33 | `while (dist[l2p[a] * n_phys + l2p[b]] > 1)` | 37,8 % | odczyt globalny `dist` i lokalny `l2p`; 57 % nadmiarowych sektorów (dostęp nieskoalesowany) |
+   | 40 | `if (other != kEmpty) l2p[other] = pa;` | 29,0 % | zapis do pamięci lokalnej |
+   | 36 | `const uint8_t other = p2l[w];` | 12,4 % | odczyt z pamięci lokalnej |
+   | 35 | `const int w = next_hop[pa * n_phys + l2p[b]];` | 6,2 % | odczyt globalny `next_hop`; 40 % nadmiarowych sektorów |
+   | pozostałe | | ok. 15 % | |
+
+   Około 85 % przestojów to dostęp do pamięci w pętli wstawiania SWAP-ów: tablice mapowania `l2p`/`p2l` w pamięci
+   lokalnej oraz tablice `dist`/`next_hop` w pamięci globalnej. W samym kernelu (`gpu_fitness.cu`, zrzut dodatkowy)
+   inicjalizacja tablic (linie 35–39) to łącznie ok. 3 % przestojów. W pętli `while` aktywnych jest średnio 17–24 z
+   32 wątków warpu (kolumna „Avg. Predicated-On Threads Executed”), co pokazuje rozbieżność wątków.
+
+   **Proponowany podpis:** „Widok źródła w Nsight Compute: przestoje warpów skupiają się na dostępach do pamięci
+   w pętli wstawiania SWAP-ów routera (tablice mapowania w pamięci lokalnej, tablice odległości w pamięci
+   globalnej).”
+
+Wszystkie pliki leżą w `results\figures` (`fig_ncu_sol_rtx5080.png`, `fig_ncu_memory_rtx5080.png`,
+`fig_ncu_source_rtx5080.png`, `fig_ncu_source_kernel_rtx5080.png`).
 
 Opcjonalnie, na potrzeby samej sekcji 2.5, jeden zrzut osi czasu z Nsight Systems pokazujący, jak wygląda narzędzie:
 

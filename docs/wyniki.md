@@ -414,7 +414,10 @@ Oba koszty to poniżej 0,2 % czasu przebiegu. Jednorazowy koszt inicjalizacji CU
 |---|---:|---:|---:|
 | czas pod `ncu` [ms] | 3,50 | 13,0 | 8,53 |
 | przepustowość SM (`SM Throughput`) | 14,6 % | 20,3 % | 19,1 % |
-| przepustowość pamięci (`Memory Throughput`) | 91,8 % | 73,6 % | 94,8 % |
+| przepustowość pamięci (`Memory Throughput`, maksimum z poziomów niżej) | 91,8 % | 73,6 % | 94,8 % |
+| przepustowość L1 (`L1/TEX Cache Throughput`) | 62,2 % | **87,8 %** | 81,0 % |
+| przepustowość L2 (`L2 Cache Throughput`) | **91,8 %** | 73,6 % | **94,8 %** |
+| przepustowość DRAM | 1,3 % | 27,1 % | 0,2 % |
 | zajętość osiągnięta / teoretyczna | 85,4 / 100 % | 93,6 / 100 % | 90,0 / 100 % |
 | rejestry na wątek | 38 | 22 | 38 |
 | aktywne wątki na warp (z 32) | 19,3 | 19,3 | 19,3 |
@@ -429,6 +432,14 @@ Liczba instrukcji pamięci jest taka sama na wszystkich kartach:
 - 13,0 mln odczytów globalnych (`pairs`, `dist`, `next_hop`);
 - 0 odczytów pamięci współdzielonej.
 
+Ruch w sektorach 32-bajtowych (RTX 5080; na pozostałych kartach prawie tak samo):
+
+- zapisy pamięci lokalnej to 149 mln sektorów, a odczyty 93 mln. L1 przepuszcza zapisy do L2, więc do L2 trafia
+  144 mln sektorów zapisu (ok. 4,6 GB na wywołanie) wobec 17 mln sektorów odczytu. Zapisy to 89 % ruchu L2;
+- odczyty globalne to 13,0 mln żądań i 110 mln sektorów, czyli 8,5 sektora na żądanie warpu. Dostęp jest
+  nieskoalesowany: każdy wątek czyta własny wiersz populacji (krok 27 B) i losowe elementy tablic `dist` /
+  `next_hop`. `ncu` raportuje, że wątek wykorzystuje średnio 1,7 z 32 bajtów sektora.
+
 `ncu` blokuje zegary, więc czasy kernela są w nim dłuższe niż w `nsys` (RTX 5080: 3,50 vs 3,13 ms).
 
 ### Obserwacje
@@ -442,14 +453,25 @@ Liczba instrukcji pamięci jest taka sama na wszystkich kartach:
    sens dopiero po przyspieszeniu hosta.
 3. **Koszt MPI (migracja, zakończenie) jest pomijalny** (poniżej 0,2 %). Słabsza skalowalność konfiguracji
    wielowęzłowych nie wynika z komunikacji, tylko z niejednorodnego tempa wysp (zob. kampania TTT).
-4. **Kernel jest ograniczony potokiem pamięci L1 / LSU, nie obliczeniami ani DRAM.** Wskazuje na to:
-   - wysoka przepustowość pamięci (74–95 %) przy niskiej przepustowości SM (15–20 %);
-   - wysokie trafienia L1 / L2;
-   - przestoje `lg_throttle` (pełna kolejka instrukcji lokalnych i globalnych) i `long_scoreboard`.
+4. **Kernel jest ograniczony przepustowością pamięci podręcznych, nie obliczeniami ani DRAM.** Na RTX 5080 i RTX
+   5070 Laptop (sm_120) wąskim gardłem jest L2 (92–95 %), na RTX 3060 (sm_86) L1 (88 %). Na kartach RTX 50xx DRAM
+   jest prawie nieużywany (0,2–1,3 %), bo cały zbiór roboczy mieści się w L2. RTX 3060 ma znacznie mniejszą L2 i część
+   ruchu (głównie zapisy pamięci lokalnej) trafia do DRAM (27 %). Wskazuje na to:
+   - niska przepustowość SM (15–20 %) i aktywność wydawania instrukcji (8–10 %);
+   - przestoje `long_scoreboard` (czekanie na dane z L1 / L2) i `lg_throttle` (pełna kolejka instrukcji lokalnych
+     i globalnych), razem 95 % próbek.
 
-   Źródłem są dynamicznie indeksowane tablice `l2p` / `p2l`, które trafiają do pamięci lokalnej, oraz odczyty
-   tabel `dist` / `next_hop` z pamięci globalnej (pamięć współdzielona nie jest używana). Rozbieżność wątków (19,3
-   z 32 aktywnych) wynika z różnej liczby SWAP-ów u różnych osobników.
+   Głównym źródłem ruchu są zapisy dynamicznie indeksowanych tablic `l2p` / `p2l`. Trafiają one do pamięci
+   lokalnej, a L1 przepuszcza je do L2 (89 % ruchu L2). Drugim źródłem są nieskoalesowane odczyty globalne
+   (populacja, `dist` / `next_hop`; pamięć współdzielona nie jest używana). Rozbieżność wątków (19,3 z 32
+   aktywnych) wynika z różnej liczby SWAP-ów u różnych osobników.
+
+   Widok Source w `ncu` (RTX 5080) daje podobny obraz: 37,8 % próbek przestojów przypada na warunek pętli `while`
+   w `route` (odczyt `dist` i `l2p`), 29,0 % na zapis `l2p[other]`, 12,4 % na odczyt `p2l[w]` i 6,2 % na odczyt
+   `next_hop`. Odczyty `dist` / `next_hop` mają 57 % / 40 % nadmiarowych sektorów.
+
+   Wstępna wersja tego punktu (2026-11-25) mówiła o potoku L1 / LSU na wszystkich kartach. Poprawiono ją po
+   przejrzeniu sekcji Speed Of Light w `ncu-ui`, gdzie `Memory Throughput` jest równe `L2 Cache Throughput`.
 5. Na RTX 3060 w przebiegu na 3 hostach kernel dla połowy populacji (131 072) trwał średnio 14,2 ms, a w
    pojedynczym profilu 10,2 ms dla 262 144, przy dużym rozrzucie (4,9–24,4 ms). Przyczyny nie wyjaśniono. Możliwe,
    że kartę obciążał wtedy pulpit albo czas zależy od zawartości populacji (liczby SWAP-ów). Do sprawdzenia przy
@@ -457,7 +479,9 @@ Liczba instrukcji pamięci jest taka sama na wszystkich kartach:
 
 Wniosek do iteracji II (bez zmian w V0): pierwszy kandydat wydajnościowy to operatory GA na hoście. Najpierw
 drobniejsze zakresy NVTX (selekcja, krzyżowanie, mutacja), potem wielowątkowość albo przeniesienie operatorów na
-GPU. Optymalizacje kernela (tabele w pamięci współdzielonej, `__constant__`) i kopii mają sens dopiero potem.
+GPU. Optymalizacje kernela mają sens dopiero potem. Najwięcej obiecuje usunięcie zapisów pamięci lokalnej, np.
+trzymanie mapowania w rejestrach lub pamięci współdzielonej. Mniej: tabele w pamięci współdzielonej i
+`__constant__`, kopie.
 
 ## Kandydaci do optymalizacji
 
