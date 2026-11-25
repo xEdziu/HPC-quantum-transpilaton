@@ -21,8 +21,9 @@ struct SplitMix64 {
     using result_type = uint64_t;
     uint64_t state;
     explicit SplitMix64(uint64_t seed) : state(seed) {}
-    static constexpr result_type min() { return 0; }
-    static constexpr result_type max() { return ~result_type{0}; }
+    // (min)/(max) in parentheses: windows.h (via mpi.h) defines min/max macros
+    static constexpr result_type(min)() { return 0; }
+    static constexpr result_type(max)() { return ~result_type{0}; }
     result_type operator()() {
         uint64_t z = (state += 0x9E3779B97F4A7C15ull);
         z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;

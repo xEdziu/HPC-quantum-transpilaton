@@ -176,8 +176,7 @@ static void test_threads_independent() {
         seq4.push_back(s.best);
         mean4.push_back(s.mean);
     });
-    std::printf("  threads 1 vs 4: best=%d/%d (available threads: %d)
-", r1.best_fitness, r4.best_fitness,
+    std::printf("  threads 1 vs 4: best=%d/%d (available threads: %d)\n", r1.best_fitness, r4.best_fitness,
                 effective_threads(0));
     CHECK(seq1 == seq4);
     CHECK(mean1 == mean4);  // whole population identical, not just the best
