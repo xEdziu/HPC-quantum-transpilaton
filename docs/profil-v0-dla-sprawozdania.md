@@ -18,8 +18,8 @@ krok 7. Znane problemy narzędzi: [profilowanie.md](profilowanie.md).
    V0.**
 2. Kopie danych między CPU a GPU zajmują 1–2 % czasu generacji, a komunikacja MPI między komputerami poniżej 0,2 %.
    Rozproszenie na 3 komputery prawie nic nie kosztuje komunikacyjnie.
-3. Sam kernel oceny (fitness) jest ograniczony dostępem do pamięci podręcznej L1 (pamięć lokalna wątków i tablice
-   w pamięci globalnej), a nie obliczeniami. Przyspieszanie go ma jednak sens dopiero po przyspieszeniu operatorów
+3. Sam kernel oceny (fitness) jest ograniczony przepustowością pamięci podręcznych (L2 na kartach RTX 50xx, L1
+   na RTX 3060), a nie obliczeniami. Główną przyczyną są zapisy tablic mapowania w pamięci lokalnej wątków. Przyspieszanie go ma jednak sens dopiero po przyspieszeniu operatorów
    na CPU: nawet nieskończenie szybki kernel skróciłby generację na RTX 5080 najwyżej 1,09×.
 
 ## Co zmierzyliśmy (do sekcji 2.5 „Narzędzia profilowania”)
@@ -130,38 +130,43 @@ i odebranych migrantów w czasie.”
 **Co pokazuje:** dla każdej karty słupki „procent maksimum” dla:
 
 - przepustowości SM (obliczenia);
-- przepustowości pamięci;
+- przepustowości pamięci podręcznych L1 i L2 oraz pamięci DRAM;
 - osiągniętej zajętości multiprocesorów;
-- aktywności wydawania instrukcji;
-- trafień w pamięć podręczną L1.
+- aktywności wydawania instrukcji.
 
-`prof_ncu.csv` ma pełną listę metryk: rejestry, IPC, liczby instrukcji pamięci, najczęstsze przyczyny przestojów
-warpów.
+`prof_ncu.csv` ma pełną listę metryk: rejestry, IPC, liczby instrukcji i sektorów pamięci, trafienia L1/L2,
+najczęstsze przyczyny przestojów warpów.
 
 | Metryka | RTX 5080 | RTX 3060 | RTX 5070 Laptop |
 |---|---:|---:|---:|
 | przepustowość SM | 14,6 % | 20,3 % | 19,1 % |
-| przepustowość pamięci | 91,8 % | 73,6 % | 94,8 % |
+| przepustowość L1 | 62,2 % | **87,8 %** | 81,0 % |
+| przepustowość L2 | **91,8 %** | 73,6 % | **94,8 %** |
+| przepustowość DRAM | 1,3 % | 27,1 % | 0,2 % |
 | zajętość osiągnięta (teoretyczna 100 %) | 85 % | 94 % | 90 % |
 | aktywne wątki w warpie (z 32) | 19,3 | 19,3 | 19,3 |
 | trafienia L1 / L2 | 90 / 99 % | 80 / 100 % | 92 / 100 % |
-| główne przestoje | oczekiwanie na pamięć (`long_scoreboard`), przepełniona kolejka L1 (`lg_throttle`) | to samo | to samo |
+| główne przestoje | oczekiwanie na dane z L1/L2 (`long_scoreboard`) i przepełniona kolejka instrukcji pamięci (`lg_throttle`), razem 95 % próbek | to samo | to samo |
 
 **Jak czytać:**
 
-- Pamięć jest wykorzystana prawie w 100 %, a jednostki obliczeniowe w 15–20 %. Kernel jest więc ograniczony
-  pamięcią, a nie obliczeniami.
-- Trafienia w cache są bardzo wysokie, więc nie chodzi o pamięć DRAM karty, tylko o sam potok pamięci L1.
+- Jedna z pamięci podręcznych pracuje na 88–95 % możliwości (L2 na RTX 5080 i 5070, L1 na RTX 3060), a
+  jednostki obliczeniowe na 15–20 %. Kernel jest więc ograniczony pamięcią, a nie obliczeniami.
+- Na kartach RTX 50xx pamięć DRAM jest prawie nieużywana (0,2–1,3 %): wszystko mieści się w cache, a problemem
+  jest sama przepustowość L1/L2. RTX 3060 ma znacznie mniejszą pamięć L2, więc część ruchu trafia tam do DRAM
+  (27 %), ale i tak ogranicza L1.
 - Przyczyny w kodzie:
-  - każdy wątek trzyma swoje tablice mapowania (`l2p`, `p2l`) w pamięci lokalnej, która fizycznie leży w L1/L2:
-    16,5 mln odczytów i 19,5 mln zapisów na wywołanie;
-  - tablice odległości i następnego kroku (`dist`, `next_hop`) są czytane z pamięci globalnej zamiast ze
-    współdzielonej.
+  - każdy wątek trzyma swoje tablice mapowania (`l2p`, `p2l`) w pamięci lokalnej. Zapisy do niej L1 przepuszcza
+    do L2: ok. 4,6 GB zapisów na jedno wywołanie kernela, czyli 89 % całego ruchu L2;
+  - odczyty z pamięci globalnej (populacja oraz tablice `dist`, `next_hop`) są nieskoalesowane: wątki w warpie
+    czytają rozrzucone adresy (8,5 sektora na żądanie). `ncu` wylicza, że z 32 bajtów pobranego sektora wątek
+    wykorzystuje średnio 1,7;
+  - tablice routera nie są w pamięci współdzielonej.
 - 19,3 z 32 aktywnych wątków w warpie oznacza rozbieżność wątków: różne osobniki wymagają różnej liczby SWAP-ów,
   więc pętla routera kończy się w różnym momencie.
 
-**Proponowany podpis:** „Kernel oceny w Nsight Compute: wysokie wykorzystanie potoku pamięci przy niskim
-wykorzystaniu jednostek obliczeniowych (kernel ograniczony pamięcią).”
+**Proponowany podpis:** „Kernel oceny w Nsight Compute: wysokie wykorzystanie pamięci podręcznych L1/L2 przy niskim
+wykorzystaniu jednostek obliczeniowych (kernel ograniczony przepustowością pamięci podręcznych).”
 
 ## Wniosek do sekcji 3.3 (wąskie gardło i decyzja)
 
@@ -171,9 +176,10 @@ Gotowy akapit do przeredagowania:
 > zajmują 85–92 % czasu generacji (72–90 % w przebiegu na trzech komputerach), a GPU przez ten czas pozostaje
 > bezczynne. Kopie danych CPU↔GPU to 1–2 % czasu generacji, a obsługa migracji MPI – poniżej 0,2 %. Zgodnie z prawem
 > Amdahla nawet nieskończenie szybka ocena na GPU skróciłaby generację na RTX 5080 najwyżej 1,09×, podczas gdy
-> usunięcie kosztu operatorów na CPU dawałoby do 12×. Kernel oceny jest ograniczony potokiem pamięci (Nsight Compute:
-> 74–95 % przepustowości pamięci przy 15–20 % przepustowości obliczeniowej) z powodu tablic w pamięci lokalnej
-> wątków i odczytów tablic routera z pamięci globalnej. **Decyzja:** w iteracji II w pierwszej kolejności
+> usunięcie kosztu operatorów na CPU dawałoby do 12×. Kernel oceny jest ograniczony przepustowością pamięci
+> podręcznych (Nsight Compute: L2 92–95 % na kartach RTX 50xx, L1 88 % na RTX 3060, przy 15–20 % przepustowości
+> obliczeniowej; DRAM 0,2–1,3 % na RTX 50xx i 27 % na RTX 3060). Główną przyczyną są zapisy tablic mapowania w pamięci lokalnej wątków (89 % ruchu
+> L2), a drugą nieskoalesowane odczyty z pamięci globalnej. **Decyzja:** w iteracji II w pierwszej kolejności
 > przyspieszamy operatory GA (najpierw dokładniejsze zakresy NVTX dla selekcji, krzyżowania i mutacji, potem
 > zrównoleglenie lub przeniesienie na GPU), a optymalizacje kernela i kopii odkładamy na kolejne iteracje.
 
@@ -208,10 +214,15 @@ Otwarcie Nsight Compute (zwykłe okno PowerShell):
 
 1. **Roofline** (`fig_ncu_roofline_rtx5080.png`):
    - zakładka **Details**;
-   - rozwiń sekcję **GPU Speed Of Light Roofline Chart**;
+   - w sekcji **GPU Speed Of Light Throughput** przełącz wykres (lista po prawej stronie nagłówka) na
+     **GPU Roofline Chart**;
    - zrzut samego wykresu (Win+Shift+S).
 
-   Na wykresie kropka kernela leży daleko pod dachem obliczeniowym, po stronie ograniczenia pamięcią.
+   Uwaga: domyślnie w tym miejscu jest wykres słupkowy **GPU Throughput**. Roofline włączasz listą po prawej stronie
+   nagłówka sekcji (**GPU Throughput Chart** → **GPU Roofline Chart**). Na wykresie kropka kernela leży daleko pod
+   dachem obliczeniowym. Roofline liczy intensywność arytmetyczną względem DRAM, a na RTX 5080 nasz kernel prawie
+   nie używa DRAM, więc kropka może wyglądać nietypowo. W podpisie warto dodać, że ograniczeniem jest L2, a nie DRAM (sekcja
+   Speed Of Light).
 2. **Source** (`fig_ncu_source_rtx5080.png`):
    - zakładka **Source**;
    - u góry wybierz widok **Source and SASS** albo samo **Source**;
