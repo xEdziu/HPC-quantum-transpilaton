@@ -466,6 +466,10 @@ Ruch w sektorach 32-bajtowych (RTX 5080; na pozostałych kartach prawie tak samo
    (populacja, `dist` / `next_hop`; pamięć współdzielona nie jest używana). Rozbieżność wątków (19,3 z 32
    aktywnych) wynika z różnej liczby SWAP-ów u różnych osobników.
 
+   Widok Source w `ncu` (RTX 5080) daje podobny obraz: 37,8 % próbek przestojów przypada na warunek pętli `while`
+   w `route` (odczyt `dist` i `l2p`), 29,0 % na zapis `l2p[other]`, 12,4 % na odczyt `p2l[w]` i 6,2 % na odczyt
+   `next_hop`. Odczyty `dist` / `next_hop` mają 57 % / 40 % nadmiarowych sektorów.
+
    Wstępna wersja tego punktu (2026-11-25) mówiła o potoku L1 / LSU na wszystkich kartach. Poprawiono ją po
    przejrzeniu sekcji Speed Of Light w `ncu-ui`, gdzie `Memory Throughput` jest równe `L2 Cache Throughput`.
 5. Na RTX 3060 w przebiegu na 3 hostach kernel dla połowy populacji (131 072) trwał średnio 14,2 ms, a w

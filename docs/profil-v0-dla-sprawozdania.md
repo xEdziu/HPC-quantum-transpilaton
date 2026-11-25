@@ -233,15 +233,32 @@ a router w kernelu wykonuje wyłącznie operacje na liczbach całkowitych. `ncu`
 więc na wykresie nie ma punktu kernela. Do sprawozdania wystarczy jedno zdanie: „Analiza Roofline nie ma
 zastosowania, ponieważ kernel nie wykonuje operacji zmiennoprzecinkowych; ograniczenie wskazuje sekcja Speed Of
 Light.”
-3. **Source** (`fig_ncu_source_rtx5080.png`):
-   - zakładka **Source**;
-   - u góry wybierz widok **Source and SASS** albo samo **Source**;
-   - kliknij nagłówek kolumny **Warp Stall Sampling (All Samples)**, żeby posortować malejąco;
-   - zrzut kilkunastu górnych linii.
+3. **Source** (`fig_ncu_source_rtx5080.png`; dodatkowo `fig_ncu_source_kernel_rtx5080.png`):
+   - zakładka **Source**, widok **Source**;
+   - na liście **Source** wybierz plik z funkcją `route` (router) albo `gpu_fitness.cu` (sam kernel);
+   - zrzut fragmentu z liczbami w kolumnach **Warp Stall Sampling (All Samples)** i **Instructions Executed**.
 
-   Najgorętsze linie są w pętli routera `count_swaps` (odczyty `dist`/`next_hop` i aktualizacja `l2p`/`p2l`).
+   Rozkład próbek przestojów warpów w pętli routera `route` (RTX 5080):
 
-Zapisz wszystkie trzy pliki w `results\figures`.
+   | Linia | Kod | Przestoje warpów | Uwagi `ncu` |
+   |---|---|---:|---|
+   | 33 | `while (dist[l2p[a] * n_phys + l2p[b]] > 1)` | 37,8 % | odczyt globalny `dist` i lokalny `l2p`; 57 % nadmiarowych sektorów (dostęp nieskoalesowany) |
+   | 40 | `if (other != kEmpty) l2p[other] = pa;` | 29,0 % | zapis do pamięci lokalnej |
+   | 36 | `const uint8_t other = p2l[w];` | 12,4 % | odczyt z pamięci lokalnej |
+   | 35 | `const int w = next_hop[pa * n_phys + l2p[b]];` | 6,2 % | odczyt globalny `next_hop`; 40 % nadmiarowych sektorów |
+   | pozostałe | | ok. 15 % | |
+
+   Około 85 % przestojów to dostęp do pamięci w pętli wstawiania SWAP-ów: tablice mapowania `l2p`/`p2l` w pamięci
+   lokalnej oraz tablice `dist`/`next_hop` w pamięci globalnej. W samym kernelu (`gpu_fitness.cu`, zrzut dodatkowy)
+   inicjalizacja tablic (linie 35–39) to łącznie ok. 3 % przestojów. W pętli `while` aktywnych jest średnio 17–24 z
+   32 wątków warpu (kolumna „Avg. Predicated-On Threads Executed”), co pokazuje rozbieżność wątków.
+
+   **Proponowany podpis:** „Widok źródła w Nsight Compute: przestoje warpów skupiają się na dostępach do pamięci
+   w pętli wstawiania SWAP-ów routera (tablice mapowania w pamięci lokalnej, tablice odległości w pamięci
+   globalnej).”
+
+Wszystkie pliki leżą w `results\figures` (`fig_ncu_sol_rtx5080.png`, `fig_ncu_memory_rtx5080.png`,
+`fig_ncu_source_rtx5080.png`, `fig_ncu_source_kernel_rtx5080.png`).
 
 Opcjonalnie, na potrzeby samej sekcji 2.5, jeden zrzut osi czasu z Nsight Systems pokazujący, jak wygląda narzędzie:
 
