@@ -201,7 +201,7 @@ Do rejestru ADR / tabeli V→V+1 (sekcja 6):
 - `nsys` działał bez uprawnień administratora, więc bez próbkowania CPU. Operatorów na CPU nie rozbijamy jeszcze na
   poszczególne funkcje; to pierwszy krok iteracji II.
 
-## Dwa zrzuty z GUI (sekcja 2.5 – „zrzuty z narzędzi”)
+## Trzy zrzuty z GUI (sekcja 2.5 – „zrzuty z narzędzi”)
 
 Tych widoków nie da się sensownie odtworzyć wykresem. Raporty leżą na AMG-NORTH w
 `E:\mgr\sem2\HPC-quantum-transpilaton\results\prof`.
@@ -212,18 +212,28 @@ Otwarcie Nsight Compute (zwykłe okno PowerShell):
 & 'C:\Program Files\NVIDIA Corporation\Nsight Compute 2025.2.1\host\windows-desktop-win7-x64\ncu-ui.exe' E:\mgr\sem2\HPC-quantum-transpilaton\results\prof\ncu_AMG-NORTH.ncu-rep
 ```
 
-1. **Roofline** (`fig_ncu_roofline_rtx5080.png`):
-   - zakładka **Details**;
-   - w sekcji **GPU Speed Of Light Throughput** przełącz wykres (lista po prawej stronie nagłówka) na
-     **GPU Roofline Chart**;
-   - zrzut samego wykresu (Win+Shift+S).
+1. **Speed Of Light** (`fig_ncu_sol_rtx5080.png`):
+   - zakładka (Page) **Details**; lista sekcji po prawej nie może być ustawiona na **All**, bo wtedy rozwijają się
+     wszystkie sekcje;
+   - zwiń wszystkie sekcje oprócz **GPU Speed Of Light Throughput**; wykres tej sekcji ustawiony na
+     **GPU Throughput Chart** (lista po prawej stronie nagłówka);
+   - zrzut od nagłówka sekcji do końca wykresu słupkowego (Win+Shift+S).
 
-   Uwaga: domyślnie w tym miejscu jest wykres słupkowy **GPU Throughput**. Roofline włączasz listą po prawej stronie
-   nagłówka sekcji (**GPU Throughput Chart** → **GPU Roofline Chart**). Na wykresie kropka kernela leży daleko pod
-   dachem obliczeniowym. Roofline liczy intensywność arytmetyczną względem DRAM, a na RTX 5080 nasz kernel prawie
-   nie używa DRAM, więc kropka może wyglądać nietypowo. W podpisie warto dodać, że ograniczeniem jest L2, a nie DRAM (sekcja
-   Speed Of Light).
-2. **Source** (`fig_ncu_source_rtx5080.png`):
+   Widać na nim przepustowość: Compute (SM) 14,6 %, L1 62,2 %, L2 91,8 % (równa `Memory Throughput`), DRAM 1,3 %.
+   Kernel jest więc ograniczony przez L2, a nie obliczenia czy DRAM.
+2. **Memory Chart** (`fig_ncu_memory_rtx5080.png`):
+   - rozwiń sekcję **Memory Workload Analysis** (lista po prawej stronie jej nagłówka: **Memory Chart**);
+   - zrzut schematu z blokami Kernel → L1/TEX Cache → L2 Cache → Device Memory.
+
+   Widać ruch między poziomami pamięci: gruby strumień zapisów L1 → L2 (ok. 4,6 GB na wywołanie; zapisy pamięci
+   lokalnej `l2p`/`p2l`) i znikomy ruch do pamięci urządzenia.
+
+Roofline pomijamy celowo. Wykresy Roofline w Nsight Compute liczą operacje zmiennoprzecinkowe (FP16/FP32/FP64),
+a router w kernelu wykonuje wyłącznie operacje na liczbach całkowitych. `ncu` raportuje 0 % szczytu FP32 i FP64,
+więc na wykresie nie ma punktu kernela. Do sprawozdania wystarczy jedno zdanie: „Analiza Roofline nie ma
+zastosowania, ponieważ kernel nie wykonuje operacji zmiennoprzecinkowych; ograniczenie wskazuje sekcja Speed Of
+Light.”
+3. **Source** (`fig_ncu_source_rtx5080.png`):
    - zakładka **Source**;
    - u góry wybierz widok **Source and SASS** albo samo **Source**;
    - kliknij nagłówek kolumny **Warp Stall Sampling (All Samples)**, żeby posortować malejąco;
@@ -231,7 +241,7 @@ Otwarcie Nsight Compute (zwykłe okno PowerShell):
 
    Najgorętsze linie są w pętli routera `count_swaps` (odczyty `dist`/`next_hop` i aktualizacja `l2p`/`p2l`).
 
-Zapisz oba pliki w `results\figures`.
+Zapisz wszystkie trzy pliki w `results\figures`.
 
 Opcjonalnie, na potrzeby samej sekcji 2.5, jeden zrzut osi czasu z Nsight Systems pokazujący, jak wygląda narzędzie:
 

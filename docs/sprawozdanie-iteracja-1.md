@@ -75,7 +75,7 @@ Tabela z [adr/README.md](adr/README.md) i [dziennik-decyzji.md](dziennik-decyzji
 
 ## Jeszcze brakuje
 
-- Dwa zrzuty z GUI Nsight Compute (Roofline, widok Source):
+- Trzy zrzuty z GUI Nsight Compute (Speed Of Light, Memory Chart, widok Source; Roofline nie ma zastosowania):
   [profil-v0-dla-sprawozdania.md](profil-v0-dla-sprawozdania.md), ostatnia sekcja. Pozostałe widoki zastępują
   wykresy `prof-plot`.
 
