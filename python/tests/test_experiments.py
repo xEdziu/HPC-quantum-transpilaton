@@ -185,3 +185,80 @@ def test_load_runs_and_quality(tmp_path):
     sabre.write_text("instance,swaps\nqft_n8,10\nqft_n8,14\n", encoding="utf-8")
     q = ex.quality_table(df, sabre).iloc[0]
     assert (q["ga_best"], q["sabre_min"], q["sabre_median"]) == (18, 10, 12)
+
+
+def _nsys_db(path):
+    """Minimal nsys SQLite export: 2 generations of 10 ms, each with a 4 ms evaluation and a 0.5 ms migration."""
+    import sqlite3
+    ms = 1_000_000
+    nvtx = [("ga_run", 0, 20 * ms)]
+    for g in range(2):
+        b = g * 10 * ms
+        nvtx += [("ga_evaluate", b, b + 4 * ms), ("fitness_h2d", b, b + ms), ("fitness_kernel", b + ms, b + 3 * ms),
+                 ("fitness_d2h", b + 3 * ms, b + int(3.5 * ms)), ("mpi_migrate", b + 4 * ms, b + int(4.5 * ms))]
+    with sqlite3.connect(path) as c:
+        c.execute("CREATE TABLE NVTX_EVENTS (start INT, end INT, text TEXT)")
+        c.executemany("INSERT INTO NVTX_EVENTS VALUES (?, ?, ?)", [(s, e, n) for n, s, e in nvtx])
+        c.execute("INSERT INTO NVTX_EVENTS VALUES (5, NULL, 'marker')")  # instant event: ignored
+        c.execute("CREATE TABLE CUPTI_ACTIVITY_KIND_KERNEL (start INT, end INT)")
+        c.execute("CREATE TABLE CUPTI_ACTIVITY_KIND_MEMCPY (start INT, end INT, copyKind INT)")
+        c.executemany("INSERT INTO CUPTI_ACTIVITY_KIND_KERNEL VALUES (?, ?)", [(ms, 3 * ms), (11 * ms, 13 * ms)])
+        c.executemany("INSERT INTO CUPTI_ACTIVITY_KIND_MEMCPY VALUES (?, ?, ?)",
+                      [(0, ms, 1), (3 * ms, 3 * ms + 10, 2), (0, 5, 8)])
+
+
+def test_generation_breakdown(tmp_path):
+    db = tmp_path / "nsys_X.sqlite"
+    _nsys_db(db)
+    row = ex.generation_breakdown(ex.nsys_ranges(db))
+    assert row["generations"] == 2
+    assert row["generation_ms"] == pytest.approx(10.0)
+    assert row["fitness_h2d"] == pytest.approx(1.0)
+    assert row["fitness_kernel"] == pytest.approx(2.0)
+    assert row["fitness_d2h"] == pytest.approx(0.5)
+    assert row["evaluate_other"] == pytest.approx(0.5)
+    assert row["mpi_migrate"] == pytest.approx(0.5)
+    assert row["ga_operators"] == pytest.approx(5.5)  # 10 - 4 (evaluate) - 0.5 (migrate)
+    assert row["host_share_pct"] == pytest.approx(55.0)
+    gpu = ex.nsys_gpu(db)
+    assert list(gpu["kind"]) == ["H2D", "kernel", "D2H", "kernel"]  # device-to-device copy (kind 8) dropped
+
+
+def test_prof_label():
+    cluster = {"hosts": [{"name": "rtx5080", "gpu": "RTX 5080", "hostname": "AMG-NORTH"},
+                         {"name": "rtx3060", "gpu": "RTX 3060", "hostname": "PS04"}]}
+    hosts = ["AMG-NORTH", "PS04"]
+    assert ex.prof_label("nsys_AMG-NORTH", cluster, hosts) == "RTX 5080"
+    assert ex.prof_label("nsys_ps04", cluster, hosts) == "RTX 3060"
+    assert ex.prof_label("nsys3_1", cluster, hosts) == "3 hosts, rank 1: RTX 3060"
+    assert ex.prof_label("v1_qft_n12_pop1m", cluster, hosts) is None
+
+
+def test_prof_plot_outputs(tmp_path):
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    import sqlite3
+    ms = 1_000_000
+    for stem in ("nsys_AMG-NORTH", "nsys3_0"):
+        with sqlite3.connect(prof / f"{stem}.sqlite") as c:
+            c.execute("CREATE TABLE NVTX_EVENTS (start INT, end INT, text TEXT)")
+            c.execute("CREATE TABLE CUPTI_ACTIVITY_KIND_KERNEL (start INT, end INT)")
+            c.execute("CREATE TABLE CUPTI_ACTIVITY_KIND_MEMCPY (start INT, end INT, copyKind INT)")
+            rows = [(0, 20 * 10 * ms, "ga_run")]
+            for g in range(20):
+                b = g * 10 * ms
+                rows += [(b, b + 4 * ms, "ga_evaluate"), (b + ms, b + 3 * ms, "fitness_kernel")]
+                c.execute("INSERT INTO CUPTI_ACTIVITY_KIND_KERNEL VALUES (?, ?)", (b + ms, b + 3 * ms))
+            c.executemany("INSERT INTO NVTX_EVENTS VALUES (?, ?, ?)", rows)
+    pd.DataFrame({"elapsed_s": [0.1, 0.2], "migrants_sent": [0, 2], "migrants_received": [1, 1]}).to_csv(
+        prof / "run3_r0.csv", index=False)
+    cluster = tmp_path / "cluster.json"
+    cluster.write_text(json.dumps({"hosts": [{"name": "rtx5080", "gpu": "RTX 5080", "hostname": "AMG-NORTH"}]}))
+    out = tmp_path / "plots"
+    ex.main(["prof-plot", "--prof", str(prof), "--out", str(out), "--cluster", str(cluster),
+             "--rank-hosts", "AMG-NORTH", "--ncu-python", str(tmp_path / "missing")])
+    for name in ("prof_breakdown.csv", "prof_breakdown.png", "prof_timeline.png", "prof_3hosts.png"):
+        assert (out / name).exists(), name
+    bd = pd.read_csv(out / "prof_breakdown.csv")
+    assert list(bd["label"]) == ["RTX 5080", "3 hosts, rank 0: RTX 5080"]
+    assert bd["ga_operators"].iloc[0] == pytest.approx(6.0)
