@@ -5,6 +5,10 @@
 #include <numeric>
 #include <stdexcept>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace qmap {
 
 uint64_t splitmix64(uint64_t x) {
@@ -12,21 +16,6 @@ uint64_t splitmix64(uint64_t x) {
     x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
     x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
     return x ^ (x >> 31);
-}
-
-void random_permutation(uint8_t* out, int n, std::mt19937_64& rng) {
-    std::iota(out, out + n, uint8_t{0});
-    std::shuffle(out, out + n, rng);
-}
-
-int tournament_select(const std::vector<int>& fitness, int k, std::mt19937_64& rng) {
-    std::uniform_int_distribution<int> pick(0, static_cast<int>(fitness.size()) - 1);
-    int best = pick(rng);
-    for (int i = 1; i < k; ++i) {
-        const int c = pick(rng);
-        if (fitness[static_cast<size_t>(c)] < fitness[static_cast<size_t>(best)]) best = c;
-    }
-    return best;
 }
 
 void order_crossover_cuts(const uint8_t* p1, const uint8_t* p2, uint8_t* child, int n, int a, int b) {
@@ -44,18 +33,18 @@ void order_crossover_cuts(const uint8_t* p1, const uint8_t* p2, uint8_t* child, 
     }
 }
 
-void order_crossover(const uint8_t* p1, const uint8_t* p2, uint8_t* child, int n, std::mt19937_64& rng) {
-    std::uniform_int_distribution<int> pick(0, n - 1);
-    int a = pick(rng), b = pick(rng);
-    if (a > b) std::swap(a, b);
-    order_crossover_cuts(p1, p2, child, n, a, b);
+uint64_t child_seed(uint64_t run_seed, int gen, size_t i) {
+    // two mixing rounds: (gen, i) pairs of neighbouring children get unrelated streams
+    return splitmix64(splitmix64(run_seed ^ (static_cast<uint64_t>(gen) << 40)) ^ static_cast<uint64_t>(i));
 }
 
-void swap_mutation(uint8_t* genes, int n, std::mt19937_64& rng) {
-    const int i = std::uniform_int_distribution<int>(0, n - 1)(rng);
-    int j = std::uniform_int_distribution<int>(0, n - 2)(rng);
-    if (j >= i) ++j;
-    std::swap(genes[i], genes[j]);
+int effective_threads(int threads) {
+#ifdef _OPENMP
+    return threads > 0 ? threads : omp_get_max_threads();
+#else
+    (void)threads;
+    return 1;
+#endif
 }
 
 void IslandView::immigrate(const uint8_t* genes, int fitness) {
@@ -84,9 +73,11 @@ GaResult run_ga(const GaParams& p, int n_phys, const Evaluator& evaluate, const 
     };
     const auto t_start = clock::now();
 
-    std::mt19937_64 rng(splitmix64(p.seed));
+    const uint64_t run_seed = splitmix64(p.seed);
+    const int threads = effective_threads(p.threads);
     const size_t n = static_cast<size_t>(n_phys);
     const size_t pop_n = static_cast<size_t>(p.pop_size);
+    const int pop_i = p.pop_size;
     std::vector<uint8_t> pop(pop_n * n), next(pop_n * n);
     std::vector<int> fit(pop_n);
     std::vector<int> order(pop_n);
@@ -99,7 +90,11 @@ GaResult run_ga(const GaParams& p, int n_phys, const Evaluator& evaluate, const 
     for (int gen = 0;; ++gen) {
         const auto t_gen = clock::now();
         if (gen == 0) {
-            for (size_t i = 0; i < pop_n; ++i) random_permutation(&pop[i * n], n_phys, rng);
+#pragma omp parallel for schedule(static) num_threads(threads)
+            for (int i = 0; i < pop_i; ++i) {
+                SplitMix64 rng(child_seed(run_seed, 0, static_cast<size_t>(i)));
+                random_permutation(&pop[static_cast<size_t>(i) * n], n_phys, rng);
+            }
         } else {
             std::iota(order.begin(), order.end(), 0);
             std::partial_sort(order.begin(), order.begin() + p.elite, order.end(), [&fit](int a, int b) {
@@ -108,15 +103,20 @@ GaResult run_ga(const GaParams& p, int n_phys, const Evaluator& evaluate, const 
             for (int e = 0; e < p.elite; ++e)
                 std::copy_n(&pop[static_cast<size_t>(order[static_cast<size_t>(e)]) * n], n,
                             &next[static_cast<size_t>(e) * n]);
-            std::uniform_real_distribution<double> unit(0.0, 1.0);
-            for (size_t i = static_cast<size_t>(p.elite); i < pop_n; ++i) {
-                const size_t a = static_cast<size_t>(tournament_select(fit, p.tournament_k, rng));
-                const size_t b = static_cast<size_t>(tournament_select(fit, p.tournament_k, rng));
-                uint8_t* child = &next[i * n];
+            const int* fit_p = fit.data();
+            const uint8_t* pop_p = pop.data();
+            uint8_t* next_p = next.data();
+#pragma omp parallel for schedule(static) num_threads(threads)
+            for (int i = p.elite; i < pop_i; ++i) {
+                SplitMix64 rng(child_seed(run_seed, gen, static_cast<size_t>(i)));
+                std::uniform_real_distribution<double> unit(0.0, 1.0);
+                const size_t a = static_cast<size_t>(tournament_select(fit_p, pop_i, p.tournament_k, rng));
+                const size_t b = static_cast<size_t>(tournament_select(fit_p, pop_i, p.tournament_k, rng));
+                uint8_t* child = next_p + static_cast<size_t>(i) * n;
                 if (unit(rng) < p.p_crossover)
-                    order_crossover(&pop[a * n], &pop[b * n], child, n_phys, rng);
+                    order_crossover(pop_p + a * n, pop_p + b * n, child, n_phys, rng);
                 else
-                    std::copy_n(&pop[a * n], n, child);
+                    std::copy_n(pop_p + a * n, n, child);
                 if (unit(rng) < p.p_mutation) swap_mutation(child, n_phys, rng);
             }
             pop.swap(next);

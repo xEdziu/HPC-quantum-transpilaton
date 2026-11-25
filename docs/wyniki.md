@@ -483,7 +483,38 @@ GPU. Optymalizacje kernela mają sens dopiero potem. Najwięcej obiecuje usunię
 trzymanie mapowania w rejestrach lub pamięci współdzielonej. Mniej: tabele w pamięci współdzielonej i
 `__constant__`, kopie.
 
-## Kandydaci do optymalizacji
+## Iteracja II – V1: równoległe operatory GA na CPU (2026-11-25)
+
+**Diagnoza (profil V0):** operatory GA na CPU to 85–92 % czasu generacji, wykonywane jednowątkowo.
+
+**Hipoteza:** potomkowie jednej generacji powstają niezależnie, więc pętla selekcja → krzyżowanie → mutacja da się
+zrównoleglić; czas generacji powinien spaść kilkukrotnie (Amdahl: do ok. 12× przy zerowym koszcie operatorów).
+
+**Zmiana** (`perf(ga)`, gałąź `perf/parallel-host-operators`):
+
+- pętla tworzenia potomków i inicjalizacja populacji w `#pragma omp parallel for` (OpenMP, MSVC `/openmp`);
+- każdy potomek ma własny generator SplitMix64 z ziarnem wyliczonym z (ziarno przebiegu, generacja, indeks), więc
+  wynik nie zależy od liczby wątków (test `threads_independent`: 1 i 4 wątki dają identyczną populację w każdej
+  generacji);
+- flaga `--threads N` (domyślnie wszystkie wątki), liczba wątków w `summary.json`;
+- elityzm i statystyki zostają szeregowe;
+- strumień liczb losowych jest inny niż w V0, więc przebiegi V1 nie są identyczne z V0 dla tego samego ziarna.
+
+**Szybki pomiar** (`qft_n12`, `--pop 262144`, 50 generacji, ziarno 1, jedna wyspa na karcie; czas `time_s`):
+
+| Karta | V0 | V1, 1 wątek | V1, wszystkie wątki | przyspieszenie względem V0 |
+|---|---:|---:|---:|---:|
+| RTX 5080 (AMG-NORTH) | 2,46 s | 2,12 s | 0,35 s | 7,0× |
+| RTX 3060 (PS04) | 4,83 s | – | 1,22 s | 4,0× |
+| RTX 5070 Laptop (HyperX_Zuber) | 2,96 s | – | 0,71 s | 4,2× |
+
+Czasy V0 pochodzą z profilu `nsys` (zakres `ga_run`, ten sam przebieg), więc zawierają drobny narzut profilera.
+Na wszystkich kartach `best = 165`. V1 z jednym wątkiem jest szybsze od V0 (2,12 vs 2,46 s), bo generator
+SplitMix64 jest tańszy od `std::mt19937_64`.
+
+Na RTX 5080 generacja trwa teraz ok. 7 ms, z czego ok. 4 ms to ocena na GPU, więc GPU stało się główną częścią
+generacji. Pełny pomiar (kampania TTT V1, profil `nsys` V1) jest w toku.
+
 
 **Żaden z poniższych punktów nie jest zaimplementowany w v1.** To lista pomysłów do sprawdzenia po profilowaniu,
 w kolejności wynikającej z wyników, a nie z tej listy. Profil V0 (sekcja wyżej) wskazuje najpierw operatory GA

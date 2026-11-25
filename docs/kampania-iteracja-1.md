@@ -359,3 +359,15 @@ powershell -ExecutionPolicy Bypass -File .\night_migration.ps1
 Skrypt można wznowić: przebiegi z `summary.json` są pomijane. Nieudane przebiegi trafiają do
 `results\runs-migration\<wariant>\failed_runs.log`. Po zakończeniu uruchom `validate-runs` dla każdego katalogu
 wariantu. Porównanie TTT z wariantem bazowym (ECDF, mediana, częstość sukcesu) dodamy do `qmap.experiments`.
+
+## 11. Kampania TTT dla V1 (noc 2026-11-25/26)
+
+Ta sama kampania co w punkcie 3 (4 konfiguracje × 4 instancje × 10 powtórzeń, 120 s, progi z pilotażu V0,
+`adaptiveB`, `all`, ziarna 1–10, populacje jak w V0), ale z wersją V1 (równoległe operatory GA). Katalog:
+`results\runs-v1`. Skrypt `run_v1.ps1` wygenerowano poleceniem:
+
+```powershell
+uv run python -m qmap.experiments plan --targets-from results/pilot/targets.csv --reps 10 --max-time 120 --migration adaptiveB --topology all --out results/runs-v1 --script run_v1.ps1
+```
+
+Badanie migracji z punktu 10 odłożono: dotyczyło V0, a V1 kilkukrotnie zmienia tempo wysp.
