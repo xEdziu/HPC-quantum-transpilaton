@@ -156,6 +156,35 @@ static void test_run_ga(const std::string& instance) {
     CHECK(std::is_sorted(seq1.rbegin(), seq1.rend()));  // non-increasing (elitism)
 }
 
+// V1: children are built in parallel from per-child generators, so the run must not depend on the thread count.
+static void test_threads_independent() {
+    const CpuProblem p = load_problem("qaoa_n12");
+    GaParams params;
+    params.pop_size = 500;
+    params.max_generations = 12;
+    params.max_time_s = 600;
+    params.seed = 7;
+    std::vector<int> seq1, seq4;
+    std::vector<double> mean1, mean4;
+    params.threads = 1;
+    const GaResult r1 = run_ga(params, p.dev.n_phys, cpu_evaluator(p), [&](const GenerationStats& s) {
+        seq1.push_back(s.best);
+        mean1.push_back(s.mean);
+    });
+    params.threads = 4;
+    const GaResult r4 = run_ga(params, p.dev.n_phys, cpu_evaluator(p), [&](const GenerationStats& s) {
+        seq4.push_back(s.best);
+        mean4.push_back(s.mean);
+    });
+    std::printf("  threads 1 vs 4: best=%d/%d (available threads: %d)
+", r1.best_fitness, r4.best_fitness,
+                effective_threads(0));
+    CHECK(seq1 == seq4);
+    CHECK(mean1 == mean4);  // whole population identical, not just the best
+    CHECK(r1.best == r4.best);
+    CHECK(is_permutation(r1.best, p.dev.n_phys));
+}
+
 static void test_target_stop() {
     const CpuProblem p = load_problem("qft_n8");
     GaParams params;
@@ -297,6 +326,7 @@ int main() {
                  {"tournament", test_tournament},
                  {"run_ga_qft_n8", [] { test_run_ga("qft_n8"); }},
                  {"run_ga_falcon27_qaoa_n12", [] { test_run_ga("qaoa_n12"); }},
+                 {"threads_independent", test_threads_independent},
                  {"target_stop", test_target_stop},
                  {"ttt_by_target", test_ttt_by_target},
                  {"island_hook", test_island_hook},

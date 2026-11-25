@@ -20,6 +20,8 @@ add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:--generate-line-info>)
 find_package(CUDAToolkit REQUIRED)
 # MS-MPI (SDK via MSMPI_INC / MSMPI_LIB64); used only by qmap_mpi.
 find_package(MPI REQUIRED COMPONENTS CXX)
+# OpenMP for the host GA operators (MSVC: /openmp, OpenMP 2.0 is enough for parallel for).
+find_package(OpenMP REQUIRED COMPONENTS CXX)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -31,7 +33,7 @@ FetchContent_MakeAvailable(json)
 
 add_library(qmap_core STATIC src/device.cpp src/qasm_io.cpp src/route_circuit.cpp src/output.cpp src/ga.cpp src/migration.cpp)
 target_include_directories(qmap_core PUBLIC include)
-target_link_libraries(qmap_core PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(qmap_core PUBLIC nlohmann_json::nlohmann_json OpenMP::OpenMP_CXX)
 
 add_library(qmap_gpu STATIC src/gpu_fitness.cu)
 target_include_directories(qmap_gpu PUBLIC include)

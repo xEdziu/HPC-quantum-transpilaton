@@ -24,11 +24,12 @@ namespace {
 
 const char* kUsage =
     "usage: qmap_ga --instance <qasm> --device <json> [--pop N] [--generations N] [--max-time S] [--target N[,N...]]\n"
-    "               [--seed N] [--tournament K] [--pc P] [--pm P] [--elite E] [--log <csv>]\n"
+    "               [--seed N] [--tournament K] [--pc P] [--pm P] [--elite E] [--threads N] [--log <csv>]\n"
     "               [--migration fixed:N|adaptiveA|adaptiveB] [--topology all|ring] [--out-qasm <path> --out-layout <path>]\n"
     "               [--summary <json>]\n"
     "  --log writes one CSV per rank: results/run.csv -> results/run_r0.csv, results/run_r1.csv, ...\n"
     "  --summary: rank 0 writes the global result and run parameters as JSON\n"
+    "  --threads: host threads for the GA operators (default 0 = all cores); results do not depend on it\n"
     "  --target: one value, or a comma-separated list (e.g. 172,164,161): the run stops at the smallest and\n"
     "            records the time to each; -1 = no target. Every rank must get the same list.\n";
 
@@ -122,6 +123,7 @@ int main(int argc, char** argv) {
             else if (a == "--pc") params.p_crossover = to_double(a, v);
             else if (a == "--pm") params.p_mutation = to_double(a, v);
             else if (a == "--elite") params.elite = to_int(a, v);
+            else if (a == "--threads") params.threads = to_int(a, v);
             else if (a == "--log") log_path = v;
             else if (a == "--migration") { migration = qmap::parse_migration(v); migration_arg = v; }
             else if (a == "--topology") { topology = qmap::parse_topology(v); topology_arg = v; }
@@ -233,6 +235,7 @@ int main(int argc, char** argv) {
                 j["migration"] = migration_arg;
                 j["topology"] = topology_arg;
                 j["n_ranks"] = mpi.size();
+                j["threads"] = qmap::effective_threads(params.threads);  // rank 0
                 std::ofstream out = qmap::open_output(summary_path);
                 out <<j.dump(2) << "\n";
             }

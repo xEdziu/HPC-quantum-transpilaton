@@ -1,9 +1,12 @@
 #pragma once
-// Single-island genetic algorithm over permutations of the physical qubits (v1, deliberately
-// naive: host-only single-threaded operators, whole population re-evaluated every generation).
-// Host code only; the fitness evaluator is injected (GPU in qmap_ga, CPU router in tests).
+// Single-island genetic algorithm over permutations of the physical qubits. Whole population
+// re-evaluated every generation. Host code only; the fitness evaluator is injected (GPU in qmap_ga,
+// CPU router in tests). V1: the children of a generation are built in parallel (OpenMP), each from
+// its own counter-seeded generator, so a run does not depend on the number of threads.
+#include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <numeric>
 #include <random>
 #include <string>
 #include <vector>
@@ -13,20 +16,70 @@ namespace qmap {
 // Seed mixer: per-rank seeds are splitmix64(base_seed ^ rank).
 uint64_t splitmix64(uint64_t x);
 
-// Operators work on rows of n genes. Lower fitness is better.
-void random_permutation(uint8_t* out, int n, std::mt19937_64& rng);
+// Small, cheap generator (one per child): SplitMix64 stream. Satisfies UniformRandomBitGenerator.
+struct SplitMix64 {
+    using result_type = uint64_t;
+    uint64_t state;
+    explicit SplitMix64(uint64_t seed) : state(seed) {}
+    static constexpr result_type min() { return 0; }
+    static constexpr result_type max() { return ~result_type{0}; }
+    result_type operator()() {
+        uint64_t z = (state += 0x9E3779B97F4A7C15ull);
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+        return z ^ (z >> 31);
+    }
+};
+
+// Operators work on rows of n genes. Lower fitness is better. Rng: any UniformRandomBitGenerator.
+template <class Rng>
+void random_permutation(uint8_t* out, int n, Rng& rng) {
+    std::iota(out, out + n, uint8_t{0});
+    std::shuffle(out, out + n, rng);
+}
 
 // Returns the index of the best of k uniformly sampled individuals (ties: first sampled).
-int tournament_select(const std::vector<int>& fitness, int k, std::mt19937_64& rng);
+template <class Rng>
+int tournament_select(const int* fitness, int pop_size, int k, Rng& rng) {
+    std::uniform_int_distribution<int> pick(0, pop_size - 1);
+    int best = pick(rng);
+    for (int i = 1; i < k; ++i) {
+        const int c = pick(rng);
+        if (fitness[c] < fitness[best]) best = c;
+    }
+    return best;
+}
+template <class Rng>
+int tournament_select(const std::vector<int>& fitness, int k, Rng& rng) {
+    return tournament_select(fitness.data(), static_cast<int>(fitness.size()), k, rng);
+}
 
 // Order crossover with cut points a <= b: child[a..b] = p1[a..b]; the remaining positions
 // (b+1, b+2, ... wrapping) are filled with the genes missing from the segment in the order they
 // appear in p2 starting after b. The rng overload draws the cuts uniformly.
 void order_crossover_cuts(const uint8_t* p1, const uint8_t* p2, uint8_t* child, int n, int a, int b);
-void order_crossover(const uint8_t* p1, const uint8_t* p2, uint8_t* child, int n, std::mt19937_64& rng);
+template <class Rng>
+void order_crossover(const uint8_t* p1, const uint8_t* p2, uint8_t* child, int n, Rng& rng) {
+    std::uniform_int_distribution<int> pick(0, n - 1);
+    int a = pick(rng), b = pick(rng);
+    if (a > b) std::swap(a, b);
+    order_crossover_cuts(p1, p2, child, n, a, b);
+}
 
 // Swaps two distinct random genes (may move a logical qubit onto a free physical qubit).
-void swap_mutation(uint8_t* genes, int n, std::mt19937_64& rng);
+template <class Rng>
+void swap_mutation(uint8_t* genes, int n, Rng& rng) {
+    const int i = std::uniform_int_distribution<int>(0, n - 1)(rng);
+    int j = std::uniform_int_distribution<int>(0, n - 2)(rng);
+    if (j >= i) ++j;
+    std::swap(genes[i], genes[j]);
+}
+
+// Seed of the generator that builds individual i of generation gen (0 = initial population).
+uint64_t child_seed(uint64_t run_seed, int gen, size_t i);
+
+// OpenMP threads used by run_ga for threads <= 0 (all available) or the given count.
+int effective_threads(int threads);
 
 struct GaParams {
     int pop_size = 4096;
@@ -41,6 +94,7 @@ struct GaParams {
     double p_crossover = 0.9;
     double p_mutation = 0.3;  // per child
     int elite = 2;
+    int threads = 0;  // host threads for the GA operators; <= 0 = all available (OpenMP default)
 };
 
 struct GenerationStats {
