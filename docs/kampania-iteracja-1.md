@@ -272,6 +272,9 @@ Wszystkie profile powstają dla wersji V0; żadnej optymalizacji jeszcze nie wpr
 
 ## 8. Zrzuty ekranu do zrobienia ręcznie (GUI)
 
+Zrzuty nr 1–5, 8 i 10 zastępują wykresy z `uv run python -m qmap.experiments prof-plot` (`results/plots/prof_*.png`,
+opis: [profil-v0-dla-sprawozdania.md](profil-v0-dla-sprawozdania.md)); ręcznie zostają nr 6 (Roofline) i 9 (Source).
+
 Zrzuty robimy z raportów `*.nsys-rep` / `*.ncu-rep` (otwórz w `nsys-ui` / `ncu-ui`), PNG z paska narzędzi lub
 Win+Shift+S, bez zbędnych paneli, motyw jasny (do druku), nazwa pliku `fig_<opis>.png` w `results\figures`.
 

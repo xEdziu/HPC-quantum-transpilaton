@@ -107,7 +107,8 @@ Sekcje do przejrzenia w `ncu-ui results\prof\fitness.ncu-rep`:
 | `ncu` nie ma w katalogu głównym instalacji | jest tam tylko `ncu.bat`, a `ncu.exe` leży w `target\windows-desktop-win7-x64` | ścieżka przez `Get-ChildItem` (krok 7.4 kampanii) |
 | `ncu --import … --page details/raw --csv` kończy się `==ERROR== Failed to handle input report: bad conversion` | błąd konwersji przy eksporcie tekstowym (najpewniej ustawienia regionalne); sam raport jest poprawny | odczyt w `ncu-ui` albo przez moduł Pythona `ncu_report` z `<Nsight Compute>\extras\python` (działa z Pythonem projektu przez `uv run`) |
 
-Wyniki profilu V0: [wyniki.md](wyniki.md), sekcja „Iteracja I – profil V0”.
+Wyniki profilu V0: [wyniki.md](wyniki.md), sekcja „Iteracja I – profil V0”. Wykresy i tabele z zapisanych raportów:
+`uv run python -m qmap.experiments prof-plot` (opis: [profil-v0-dla-sprawozdania.md](profil-v0-dla-sprawozdania.md)).
 
 ## Pierwsza wskazówka z testu dymnego (nie pomiar)
 

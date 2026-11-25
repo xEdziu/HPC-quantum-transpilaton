@@ -40,8 +40,9 @@ Liczby i wnioski są opisane w [wyniki.md](wyniki.md) (sekcje „Iteracja I – 
     Podział czasu: **89–92 % czasu generacji to operatory GA na CPU** – główne wąskie gardło V0.
   - Profil Nsight V0 (tabele w [wyniki.md](wyniki.md), sekcja „profil V0”): zestawienia
     `results/prof/stats_*.csv`. Operatory hosta to 87–92 % generacji, kopie 1–2 %, MPI poniżej 0,2 %. Kernel jest
-    ograniczony potokiem pamięci L1/LSU (pamięć lokalna `l2p`/`p2l`, tabele w pamięci globalnej). Do tego zrzuty
-    z GUI (rozdział 8 [kampania-iteracja-1.md](kampania-iteracja-1.md)).
+    ograniczony potokiem pamięci L1/LSU (pamięć lokalna `l2p`/`p2l`, tabele w pamięci globalnej). Wykresy
+    `results/plots/prof_*.png`, opis, podpisy i gotowy akapit z wnioskiem:
+    [profil-v0-dla-sprawozdania.md](profil-v0-dla-sprawozdania.md).
   - Zegar, moc, temperatura GPU: `results/plots/bench_nvsmi_<host>.png`.
   - TTT: tabela z `results/aggregate.csv` (gotowa w [wyniki.md](wyniki.md)) i ECDF
     `results/plots/ttt_ecdf_<instancja>_<eps>.png`. Do tekstu 2–4 wykresy (np. qft_n20 przy ε 0,05, qaoa_n16 przy
@@ -73,8 +74,9 @@ Tabela z [adr/README.md](adr/README.md) i [dziennik-decyzji.md](dziennik-decyzji
 
 ## Jeszcze brakuje
 
-- Zrzuty ekranu z GUI Nsight Systems / Nsight Compute (rozdział 8 [kampania-iteracja-1.md](kampania-iteracja-1.md)).
-  Pomiar jest gotowy (raporty w `results/prof`); brakuje tylko zrzutów.
+- Dwa zrzuty z GUI Nsight Compute (Roofline, widok Source):
+  [profil-v0-dla-sprawozdania.md](profil-v0-dla-sprawozdania.md), ostatnia sekcja. Pozostałe widoki zastępują
+  wykresy `prof-plot`.
 
 ## Przygotowanie archiwum
 
@@ -82,8 +84,9 @@ W oknie uv, w katalogu repozytorium:
 
 ```powershell
 uv run python -m qmap.experiments bench-plot --bench results\bench --out results\plots
+uv run python -m qmap.experiments prof-plot
 Compress-Archive -Force -Path results\figures, results\plots, results\bench, results\aggregate.csv, results\quality.csv, results\quality-agg, results\pilot\targets.csv, results\prof\stats_*.csv, results\runs\rtx5080\qft_n12\rep1 -DestinationPath sprawozdanie_iter1.zip
 ```
 
-Przykładowy przebieg (`rtx5080/qft_n12/rep1`) daje wzór `summary.json` i logu `run_r0.csv`. Zrzuty Nsight dosyłamy po
-profilowaniu.
+Przykładowy przebieg (`rtx5080/qft_n12/rep1`) daje wzór `summary.json` i logu `run_r0.csv`. Wykresy profilu są w
+`results\plots\prof_*.png`, a dwa zrzuty z GUI Nsight Compute trafiają do `results\figures`.
