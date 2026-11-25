@@ -1,4 +1,4 @@
-"""Experiment pipeline: run-script generation, pilot targets, aggregation, validation and plots.
+"""Experiment pipeline: run-script generation, pilot targets, aggregation, validation, plots and profiles.
 
 Directory layout of one run (created by the generated PowerShell script):
     <out>/<config>/<instance>/rep<k>/              plan --targets-from: one run per rep, all eps targets of the
@@ -385,6 +385,262 @@ def cmd_bench_plot(a):
         plt.close(fig)
 
 
+# ---------------------------------------------------------------- profiling (Nsight) ----------------------------------
+# Inputs are the reports of docs/kampania-iteracja-1.md, step 7, collected in results/prof:
+#   nsys_<HOSTNAME>.sqlite   one island per card      (nsys export, created by `nsys stats`)
+#   nsys3_<rank>.sqlite      3-host run, one per rank (rank order given by --rank-hosts)
+#   run3_r<rank>.csv         GA log of the 3-host run
+#   ncu_<HOSTNAME>.ncu-rep   Nsight Compute, 3 fitness kernel launches per card
+# Times in the SQLite files are nanoseconds of the profiled host's session clock; clocks of different hosts are not
+# synchronised, so the 3-host timelines are aligned at each rank's ga_run start (right after the start barrier).
+
+NCU_METRICS = [  # (metric, column) -- ncu --set full names, values as reported by the ncu_report module
+    ("gpu__time_duration.sum", "duration_ns"),
+    ("sm__throughput.avg.pct_of_peak_sustained_elapsed", "sm_throughput_pct"),
+    ("gpu__compute_memory_throughput.avg.pct_of_peak_sustained_elapsed", "memory_throughput_pct"),
+    ("dram__throughput.avg.pct_of_peak_sustained_elapsed", "dram_throughput_pct"),
+    ("sm__warps_active.avg.pct_of_peak_sustained_active", "achieved_occupancy_pct"),
+    ("sm__maximum_warps_per_active_cycle_pct", "theoretical_occupancy_pct"),
+    ("launch__registers_per_thread", "registers_per_thread"),
+    ("launch__grid_size", "grid_size"),
+    ("launch__block_size", "block_size"),
+    ("smsp__thread_inst_executed_per_inst_executed.ratio", "active_threads_per_warp"),
+    ("smsp__issue_active.avg.pct_of_peak_sustained_active", "issue_active_pct"),
+    ("sm__inst_executed.avg.per_cycle_active", "ipc"),
+    ("l1tex__t_sector_hit_rate.pct", "l1_hit_pct"),
+    ("lts__t_sector_hit_rate.pct", "l2_hit_pct"),
+    ("smsp__sass_inst_executed_op_local_ld.sum", "local_load_inst"),
+    ("smsp__sass_inst_executed_op_local_st.sum", "local_store_inst"),
+    ("smsp__sass_inst_executed_op_global_ld.sum", "global_load_inst"),
+    ("smsp__sass_inst_executed_op_shared_ld.sum", "shared_load_inst"),
+    ("smsp__inst_executed.sum", "instructions"),
+]
+STALL_PREFIX = "smsp__pcsamp_warps_issue_stalled_"
+BREAKDOWN_PARTS = ["ga_operators", "fitness_h2d", "fitness_kernel", "fitness_d2h", "evaluate_other", "mpi_migrate"]
+PART_COLORS = {"ga_operators": "#9e9e9e", "fitness_h2d": "#4c78a8", "fitness_kernel": "#f58518",
+               "fitness_d2h": "#54a24b", "evaluate_other": "#e0c060", "mpi_migrate": "#b279a2"}
+PART_LABELS = {"ga_operators": "GA operators (CPU)", "fitness_h2d": "copy H2D", "fitness_kernel": "fitness kernel",
+               "fitness_d2h": "copy D2H", "evaluate_other": "evaluate: other", "mpi_migrate": "MPI migrate"}
+
+
+def nsys_ranges(db):
+    """NVTX push/pop ranges of an nsys SQLite export -> DataFrame(name, start, end) in ns."""
+    import sqlite3
+    with sqlite3.connect(db) as c:
+        return pd.read_sql_query(
+            "SELECT text AS name, start, end FROM NVTX_EVENTS WHERE end IS NOT NULL AND text IS NOT NULL "
+            "ORDER BY start", c)
+
+
+def nsys_gpu(db):
+    """GPU activity (CUPTI) -> DataFrame(kind in {kernel, H2D, D2H}, start, end) in ns."""
+    import sqlite3
+    with sqlite3.connect(db) as c:
+        k = pd.read_sql_query("SELECT start, end FROM CUPTI_ACTIVITY_KIND_KERNEL", c).assign(kind="kernel")
+        m = pd.read_sql_query("SELECT start, end, copyKind FROM CUPTI_ACTIVITY_KIND_MEMCPY WHERE copyKind IN (1, 2)", c)
+    m["kind"] = m.pop("copyKind").map({1: "H2D", 2: "D2H"})
+    return pd.concat([k, m], ignore_index=True).sort_values("start", ignore_index=True)
+
+
+def generation_breakdown(ranges):
+    """Mean time per generation [ms] of each part of the GA loop, from the NVTX ranges of one rank.
+
+    ga_run wraps the whole loop; inside it every generation has one ga_evaluate (fitness_h2d, fitness_kernel incl.
+    cudaDeviceSynchronize, fitness_d2h) and one mpi_migrate (island hook); the rest of ga_run is the host GA operators
+    (selection, crossover, mutation, elitism, logging)."""
+    tot = (ranges["end"] - ranges["start"]).groupby(ranges["name"]).sum() / 1e6
+    n = int((ranges["name"] == "ga_evaluate").sum())
+    if n == 0 or "ga_run" not in tot:
+        raise ValueError("no ga_run / ga_evaluate ranges")
+    get = lambda name: float(tot.get(name, 0.0))  # noqa: E731
+    parts = {
+        "ga_operators": get("ga_run") - get("ga_evaluate") - get("mpi_migrate"),
+        "fitness_h2d": get("fitness_h2d"),
+        "fitness_kernel": get("fitness_kernel"),
+        "fitness_d2h": get("fitness_d2h"),
+        "evaluate_other": get("ga_evaluate") - get("fitness_h2d") - get("fitness_kernel") - get("fitness_d2h"),
+        "mpi_migrate": get("mpi_migrate"),
+    }
+    row = {"generations": n, "generation_ms": get("ga_run") / n}
+    row.update({k: v / n for k, v in parts.items()})
+    row["host_share_pct"] = 100 * parts["ga_operators"] / get("ga_run")
+    return row
+
+
+def prof_label(stem, cluster, rank_hosts):
+    """Report file stem -> readable label ('RTX 5080', '3 hosts, rank 1: RTX 3060'); None for other reports."""
+    gpu = {h.get("hostname", h["name"]).lower(): h["gpu"] for h in cluster["hosts"]}
+    if stem.startswith("nsys3_"):
+        rank = int(stem.split("_", 1)[1])
+        host = rank_hosts[rank] if rank < len(rank_hosts) else "?"
+        return f"3 hosts, rank {rank}: {gpu.get(host.lower(), host)}"
+    if stem.startswith("nsys_"):
+        host = stem.split("_", 1)[1]
+        return gpu.get(host.lower(), host)
+    return None
+
+
+def ncu_summary(reports, ncu_python=None):
+    """First profiled kernel launch of each Nsight Compute report -> one row of NCU_METRICS + top warp stalls.
+
+    Uses the ncu_report module shipped with Nsight Compute (extras/python); `ncu --import --csv` fails on our machines
+    with 'bad conversion'. Returns None when the module cannot be found."""
+    import glob
+    import sys
+    if ncu_python is None:
+        found = sorted(glob.glob(r"C:\Program Files\NVIDIA Corporation\Nsight Compute*\extras\python"))
+        ncu_python = found[-1] if found else None
+    if not ncu_python or not (Path(ncu_python) / "ncu_report.py").exists():
+        return None
+    if ncu_python not in sys.path:
+        sys.path.append(ncu_python)
+    import ncu_report
+
+    rows = []
+    for rep in reports:
+        act = ncu_report.load_report(str(rep)).range_by_idx(0).action_by_idx(0)
+        row = {"report": Path(rep).stem, "kernel": act.name()}
+        for metric, col in NCU_METRICS:
+            m = act.metric_by_name(metric)
+            row[col] = m.value() if m is not None else None
+        stalls = {}
+        for name in act.metric_names():
+            if name.startswith(STALL_PREFIX) and not name.endswith("_not_issued"):
+                v = act.metric_by_name(name).value()
+                if isinstance(v, (int, float)):
+                    stalls[name[len(STALL_PREFIX):]] = float(v)
+        total = sum(stalls.values()) or 1.0
+        top = sorted(stalls.items(), key=lambda kv: -kv[1])[:3]
+        row["top_stalls_pct"] = "; ".join(f"{k} {100 * v / total:.0f}%" for k, v in top)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def cmd_prof_plot(a):
+    """Figures and tables of the Nsight profile (replacing GUI screenshots where a plot shows the same)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    prof, out = Path(a.prof), Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    cluster = load_cluster(a.cluster)
+    dbs = {p.stem: p for p in sorted(prof.glob("nsys*.sqlite")) if prof_label(p.stem, cluster, a.rank_hosts)}
+    if not dbs:
+        raise SystemExit(f"no nsys_*.sqlite / nsys3_*.sqlite in {prof} (run `nsys stats` first, step 7.3)")
+    singles = [s for s in dbs if s.startswith("nsys_")]
+    ranks = sorted(s for s in dbs if s.startswith("nsys3_"))
+
+    # 1. time per generation, split into parts (table + stacked bars)
+    rows = []
+    for stem in singles + ranks:
+        row = {"report": stem, "label": prof_label(stem, cluster, a.rank_hosts)}
+        row.update(generation_breakdown(nsys_ranges(dbs[stem])))
+        rows.append(row)
+    bd = pd.DataFrame(rows)
+    bd.round(4).to_csv(out / "prof_breakdown.csv", index=False)
+    fig, ax = plt.subplots(figsize=(9, 0.55 * len(bd) + 1.4))
+    left = np.zeros(len(bd))
+    y = np.arange(len(bd))[::-1]
+    for part in BREAKDOWN_PARTS:
+        ax.barh(y, bd[part], left=left, color=PART_COLORS[part], label=PART_LABELS[part])
+        left += bd[part].to_numpy()
+    for yi, (tot, share) in zip(y, zip(left, bd["host_share_pct"])):
+        ax.text(tot, yi, f" {tot:.1f} ms, CPU {share:.0f}%", va="center", fontsize=8)
+    ax.set_yticks(y, bd["label"])
+    ax.set(xlabel="mean time per generation [ms]", xlim=(0, left.max() * 1.25),
+           title="Time per generation (nsys NVTX ranges, qft_n12)")
+    ax.legend(ncol=3, fontsize=8, loc="lower right")
+    fig.savefig(out / "prof_breakdown.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    # 2. timeline of a few generations per card (what the nsys-ui timeline shows), common time scale
+    lanes = [("CPU: GA operators", "ga_operators"), ("GPU: copy H2D", "H2D"), ("GPU: fitness kernel", "kernel"),
+             ("GPU: copy D2H", "D2H")]
+    lane_color = {"ga_operators": PART_COLORS["ga_operators"], "H2D": PART_COLORS["fitness_h2d"],
+                  "kernel": PART_COLORS["fitness_kernel"], "D2H": PART_COLORS["fitness_d2h"]}
+    windows = []
+    for stem in singles:
+        r = nsys_ranges(dbs[stem])
+        ev = r[r["name"] == "ga_evaluate"].reset_index(drop=True)
+        g0, g1 = a.first_generation, a.first_generation + a.generations
+        if len(ev) <= g1:
+            raise SystemExit(f"{stem}: only {len(ev)} generations, need {g1 + 1}")
+        windows.append((stem, r, ev, ev.loc[g0, "start"], ev.loc[g1, "start"]))
+    span = max(t1 - t0 for *_, t0, t1 in windows) / 1e6
+    fig, axes = plt.subplots(len(windows), 1, figsize=(10, 1.6 * len(windows) + 0.6), sharex=True)
+    for ax, (stem, r, ev, t0, t1) in zip(np.atleast_1d(axes), windows):
+        gpu = nsys_gpu(dbs[stem])
+        bars = {"ga_operators": [(e, s - e) for e, s in zip(ev["end"][:-1], ev["start"][1:]) if e >= t0 and s <= t1]}
+        for kind in ("H2D", "kernel", "D2H"):
+            g = gpu[(gpu["kind"] == kind) & (gpu["end"] > t0) & (gpu["start"] < t1)]
+            bars[kind] = list(zip(g["start"], g["end"] - g["start"]))
+        for i, (name, key) in enumerate(lanes):
+            seg = [((s - t0) / 1e6, max(d / 1e6, span / 1500)) for s, d in bars[key]]
+            ax.broken_barh(seg, (len(lanes) - 1 - i - 0.4, 0.8), color=lane_color[key])
+        ax.set_yticks(range(len(lanes)), [n for n, _ in lanes][::-1], fontsize=8)
+        ax.set_title(f"{prof_label(stem, cluster, a.rank_hosts)}: generations {a.first_generation}-"
+                     f"{a.first_generation + a.generations - 1} (pop 262144)", fontsize=9, loc="left")
+        ax.set_xlim(0, span)
+    np.atleast_1d(axes)[-1].set_xlabel("time from the start of the first shown generation [ms]")
+    fig.savefig(out / "prof_timeline.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    # 3. 3-host run: generation rate per rank (kernels, aligned at ga_run start) and migrants over time
+    if ranks:
+        fig, (a1, a2) = plt.subplots(2, 1, figsize=(10, 6), gridspec_kw={"height_ratios": [1, 1.4]})
+        for i, stem in enumerate(ranks):
+            r = nsys_ranges(dbs[stem])
+            t0 = r.loc[r["name"] == "ga_run", "start"].iloc[0]
+            k = nsys_gpu(dbs[stem])
+            k = k[(k["kind"] == "kernel") & (k["start"] >= t0) & (k["start"] < t0 + a.window_s * 1e9)]
+            a1.broken_barh(list(zip((k["start"] - t0) / 1e9, (k["end"] - k["start"]) / 1e9)),
+                           (len(ranks) - 1 - i - 0.4, 0.8), color=PART_COLORS["fitness_kernel"])
+        a1.set_yticks(range(len(ranks)), [prof_label(s, cluster, a.rank_hosts) for s in ranks][::-1], fontsize=8)
+        a1.set(xlim=(0, a.window_s), xlabel="time since ga_run start [s] (each host's own clock)",
+               title=f"3-host run: fitness kernels in the first {a.window_s:g} s (one bar = one generation)")
+        for i, stem in enumerate(ranks):
+            log = prof / f"run3_r{stem.split('_', 1)[1]}.csv"
+            if not log.exists():
+                continue
+            d = pd.read_csv(log)
+            label = prof_label(stem, cluster, a.rank_hosts)
+            a2.step(d["elapsed_s"], d["migrants_sent"], where="post", color=f"C{i}", label=f"{label}: sent")
+            a2.step(d["elapsed_s"], d["migrants_received"], where="post", color=f"C{i}", ls="--",
+                    label=f"{label}: received")
+        a2.set(xlabel="elapsed [s]", ylabel="migrants (cumulative)", title="Migration (adaptiveB, topology all)")
+        a2.legend(fontsize=7, ncol=2)
+        fig.tight_layout()
+        fig.savefig(out / "prof_3hosts.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    # 4. Nsight Compute summary of the fitness kernel (table + bars of the Speed Of Light / occupancy numbers)
+    reps = sorted(prof.glob("ncu_*.ncu-rep"))
+    nc = ncu_summary(reps, a.ncu_python) if reps else None
+    if nc is None:
+        print("ncu_report module not found or no ncu_*.ncu-rep: skipping prof_ncu.csv / prof_ncu.png")
+    else:
+        names = {h.get("hostname", h["name"]).lower(): h["gpu"] for h in cluster["hosts"]}
+        nc.insert(1, "gpu", [names.get(s.split("_", 1)[1].lower(), s) for s in nc["report"]])
+        nc.to_csv(out / "prof_ncu.csv", index=False)
+        cols = [("sm_throughput_pct", "SM\nthroughput"), ("memory_throughput_pct", "memory\nthroughput"),
+                ("achieved_occupancy_pct", "achieved\noccupancy"), ("issue_active_pct", "issue\nactive"),
+                ("l1_hit_pct", "L1\nhit rate")]
+        fig, ax = plt.subplots(figsize=(9, 3.6))
+        w = 0.8 / len(nc)
+        x = np.arange(len(cols))
+        for i, (_, row) in enumerate(nc.iterrows()):
+            vals = [float(row[c]) for c, _ in cols]
+            ax.bar(x + (i - (len(nc) - 1) / 2) * w, vals, w, label=row["gpu"])
+        ax.set_xticks(x, [n for _, n in cols])
+        ax.set(ylabel="% of peak", ylim=(0, 105), title="fitness kernel, Nsight Compute (pop 262144, qft_n12)")
+        ax.legend(fontsize=8)
+        fig.savefig(out / "prof_ncu.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+    print(f"written to {out}: prof_breakdown.csv/.png, prof_timeline.png"
+          + (", prof_3hosts.png" if ranks else "") + ("" if nc is None else ", prof_ncu.csv/.png"))
+
+
 def build_parser():
     ap = argparse.ArgumentParser(prog="qmap.experiments", description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -432,6 +688,18 @@ def build_parser():
     p.add_argument("--bench", default="results/bench")
     p.add_argument("--out", default="results/plots")
     p.set_defaults(func=cmd_bench_plot)
+
+    p = sub.add_parser("prof-plot", help="figures and tables of the Nsight profile in results/prof")
+    p.add_argument("--prof", default="results/prof")
+    p.add_argument("--out", default="results/plots")
+    p.add_argument("--cluster", default="data/cluster.json")
+    p.add_argument("--rank-hosts", nargs="+", default=["AMG-NORTH", "PS04", "HyperX_Zuber"],
+                   help="hostname of rank 0, 1, 2 in the 3-host profile (order of the mpiexec sections)")
+    p.add_argument("--first-generation", type=int, default=10, help="first generation shown on the timeline")
+    p.add_argument("--generations", type=int, default=4, help="generations shown on the timeline")
+    p.add_argument("--window-s", type=float, default=1.0, help="time window of the 3-host kernel timeline")
+    p.add_argument("--ncu-python", help="Nsight Compute extras/python directory (default: newest installed)")
+    p.set_defaults(func=cmd_prof_plot)
     return ap
 
 
