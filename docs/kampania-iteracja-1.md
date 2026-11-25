@@ -325,3 +325,37 @@ Win+Shift+S, bez zbędnych paneli, motyw jasny (do druku), nazwa pliku `fig_<opi
 | 6 jakość | 25 min |
 | 7 profilowanie | 1 h |
 | powtórzenie kroku 3 | 5 min |
+
+## 10. Badanie dodatkowe: interwał i topologia migracji (noc 2026-11-25/26)
+
+**Cel.** Kampania TTT (punkt 3) używała jednego wariantu migracji: `adaptiveB` z topologią `all`. Na `qaoa_n16`
+szybka wyspa z małą populacją mogła narzucać swoje rozwiązanie pozostałym ([wyniki.md](wyniki.md)). Sprawdzamy, czy
+inny interwał lub topologia migracji zmienia TTT w konfiguracji 3-hostowej. To badanie parametrów wersji V0, bez
+zmian w kodzie, więc nie łamie zasady „najpierw sprawozdanie, potem optymalizacja”.
+
+**Warianty** (konfiguracja `rtx5080+rtx5070+rtx3060`, te same 4 instancje, progi z pilotażu, populacje
+262 144 / 65 536 / 131 072, 120 s, ziarna 1–10):
+
+| Wariant | `--migration` | `--topology` | Katalog |
+|---|---|---|---|
+| bazowy (już zmierzony w kampanii) | `adaptiveB` | `all` | `results\runs\rtx5080+rtx5070+rtx3060` |
+| stały interwał | `fixed:100` | `all` | `results\runs-migration\fixed100-all` |
+| adaptacyjny A | `adaptiveA` | `all` | `results\runs-migration\adaptiveA-all` |
+| pierścień | `adaptiveB` | `ring` | `results\runs-migration\adaptiveB-ring` |
+
+Te same ziarna co w kampanii dają porównanie sparowane z wariantem bazowym. Warianty są przeplecione przebieg po
+przebiegu, żeby zmiany w czasie (np. temperatura i zasilanie laptopa) nie faworyzowały żadnego z nich. Wariant bazowy
+mierzono jednak w innej sesji (2026-11-22–24), co jest zagrożeniem trafności przy porównaniu z nim.
+
+**Uruchomienie** (okno `hpc` na AMG-NORTH; laptop podłączony do zasilacza, tryb wydajności, lista kontrolna z
+punktu 0). Skrypt `night_migration.ps1` (120 przebiegów, najwyżej ok. 4,5 h) wygenerowano trzema wywołaniami
+`plan` (`--migration`, `--topology`, `--out` jak w tabeli) i przepleciono:
+
+```powershell
+cd C:\hpc\HPC-quantum-transpilaton
+powershell -ExecutionPolicy Bypass -File .\night_migration.ps1
+```
+
+Skrypt można wznowić: przebiegi z `summary.json` są pomijane. Nieudane przebiegi trafiają do
+`results\runs-migration\<wariant>\failed_runs.log`. Po zakończeniu uruchom `validate-runs` dla każdego katalogu
+wariantu. Porównanie TTT z wariantem bazowym (ECDF, mediana, częstość sukcesu) dodamy do `qmap.experiments`.
