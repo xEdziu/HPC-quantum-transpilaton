@@ -54,7 +54,7 @@ uv run python -m qmap.experiments prof-plot
 ```
 
 Pliki trafiają do `results\plots`. Wykresy zastępują większość zrzutów ekranu z GUI z listy w
-[kampania-iteracja-1.md](kampania-iteracja-1.md), krok 8. Z GUI zostają tylko dwa zrzuty, opisane na końcu.
+[kampania-iteracja-1.md](kampania-iteracja-1.md), krok 8. Z GUI zostają tylko trzy zrzuty, opisane na końcu.
 
 ### `prof_breakdown.png` + `prof_breakdown.csv` – podział czasu generacji (sekcja 3.3)
 

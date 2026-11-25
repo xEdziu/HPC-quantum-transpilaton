@@ -90,4 +90,4 @@ Compress-Archive -Force -Path results\figures, results\plots, results\bench, res
 ```
 
 Przykładowy przebieg (`rtx5080/qft_n12/rep1`) daje wzór `summary.json` i logu `run_r0.csv`. Wykresy profilu są w
-`results\plots\prof_*.png`, a dwa zrzuty z GUI Nsight Compute trafiają do `results\figures`.
+`results\plots\prof_*.png`, a trzy zrzuty z GUI Nsight Compute trafiają do `results\figures`.
