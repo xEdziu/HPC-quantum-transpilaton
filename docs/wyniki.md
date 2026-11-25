@@ -365,10 +365,105 @@ Obserwacje:
 Zagrożenia trafności: jeden przebieg na instancję (bez rozrzutu); SABRE to 10 krótkich przebiegów CPU (10 ziaren),
 a GA – 120 s na 3 GPU – porównanie dotyczy jakości wyniku, nie kosztu.
 
+## Iteracja I – profil V0 (Nsight, 2026-11-25)
+
+Ustawienia: `qft_n12`, ziarno 1, wersja V0.
+
+- `nsys profile -t cuda,nvtx`: jedna wyspa na każdej karcie (`--pop 262144`, 50 generacji) oraz przebieg na 3 hostach
+  (20 s, `adaptiveB`, `all`, populacje 262 144 / 131 072 / 65 536).
+- `ncu --set full -k regex:fitness -c 3`: 3 wywołania kernela fitness, 262 144 osobników (1024 bloki × 256 wątków).
+- Raporty i zestawienia (`stats_*.csv`) leżą w `results/prof` (poza gitem). Komendy:
+  [kampania-iteracja-1.md](kampania-iteracja-1.md), krok 7.
+
+### Podział czasu generacji
+
+Średnie z logów CSV (`eval_time_s`, `ops_time_s`, bez generacji 0). Zakresy NVTX (`ga_evaluate` względem `ga_run`)
+dają te same proporcje.
+
+| Przebieg | Karta (populacja) | ms / generację | ocena na GPU [ms] | operatory hosta [ms] | udział hosta | M ocen/s |
+|---|---|---:|---:|---:|---:|---:|
+| jedna wyspa | RTX 5080 (262 144) | 47,5 | 3,9 | 43,7 | 91,8 % | 5,43 |
+| jedna wyspa | RTX 3060 (262 144) | 92,7 | 11,4 | 81,3 | 87,7 % | 2,77 |
+| jedna wyspa | RTX 5070 Laptop (262 144) | 55,8 | 7,3 | 48,6 | 87,0 % | 4,52 |
+| 3 hosty, rank 0 | RTX 5080 (262 144) | 43,7 | 4,5 | 39,2 | 89,6 % | 5,95 |
+| 3 hosty, rank 1 | RTX 3060 (131 072) | 53,6 | 15,3 | 38,3 | 71,4 % | 2,43 |
+| 3 hosty, rank 2 | RTX 5070 Laptop (65 536) | 14,2 | 2,7 | 11,5 | 80,9 % | 4,59 |
+
+Ocena na GPU (zakresy NVTX, jedna wyspa, średnio na generację):
+
+| Karta | `fitness_h2d` [ms] | `fitness_kernel` [ms] | `fitness_d2h` [ms] | kernel w `ga_evaluate` |
+|---|---:|---:|---:|---:|
+| RTX 5080 | 0,51 | 3,47 | 0,11 | 85 % |
+| RTX 3060 | 0,90 | 10,32 | 0,22 | 90 % |
+| RTX 5070 Laptop | 1,03 | 7,54 | 0,22 | 86 % |
+
+`fitness_kernel` mierzy kernel razem z `cudaDeviceSynchronize`. Na RTX 5070 Laptop średnią podbija jedno wywołanie
+trwające 85 ms; mediana wynosi 5,5 ms.
+
+MPI widziane z hosta (przebieg na 3 hostach, 20 s):
+
+- `mpi_migrate`: łącznie 4–7 ms na rank (średnio 3–18 µs na generację).
+- `mpi_terminate`: 4–35 ms jednorazowo.
+
+Oba koszty to poniżej 0,2 % czasu przebiegu. Jednorazowy koszt inicjalizacji CUDA (pierwszy `cudaMalloc`) wynosi
+55–110 ms.
+
+### Kernel fitness (Nsight Compute, pierwsze z 3 wywołań)
+
+| Metryka | RTX 5080 | RTX 3060 | RTX 5070 Laptop |
+|---|---:|---:|---:|
+| czas pod `ncu` [ms] | 3,50 | 13,0 | 8,53 |
+| przepustowość SM (`SM Throughput`) | 14,6 % | 20,3 % | 19,1 % |
+| przepustowość pamięci (`Memory Throughput`) | 91,8 % | 73,6 % | 94,8 % |
+| zajętość osiągnięta / teoretyczna | 85,4 / 100 % | 93,6 / 100 % | 90,0 / 100 % |
+| rejestry na wątek | 38 | 22 | 38 |
+| aktywne wątki na warp (z 32) | 19,3 | 19,3 | 19,3 |
+| aktywność wydawania instrukcji (`issue active`) | 7,9 % | 8,4 % | 10,0 % |
+| IPC | 0,31 | 0,34 | 0,40 |
+| trafienia L1 / L2 | 90 / 99 % | 80 / 100 % | 92 / 100 % |
+| dominujące przestoje warpów | `long_scoreboard`, `lg_throttle` | `lg_throttle`, `long_scoreboard` | `long_scoreboard`, `lg_throttle` |
+
+Liczba instrukcji pamięci jest taka sama na wszystkich kartach:
+
+- 16,5 mln odczytów i 19,5 mln zapisów pamięci lokalnej (tablice `l2p` / `p2l` w wątku);
+- 13,0 mln odczytów globalnych (`pairs`, `dist`, `next_hop`);
+- 0 odczytów pamięci współdzielonej.
+
+`ncu` blokuje zegary, więc czasy kernela są w nim dłuższe niż w `nsys` (RTX 5080: 3,50 vs 3,13 ms).
+
+### Obserwacje
+
+1. **Wąskie gardło V0 to operatory GA na CPU.** Zajmują 87–92 % czasu generacji przy jednej wyspie i 71–90 % w
+   przebiegu na 3 hostach. Przez ten czas GPU stoi bezczynnie, co widać na osi czasu `nsys` jako luki między
+   kernelami. Z prawa Amdahla wynika, że nawet nieskończenie szybka ocena na GPU skróciłaby generację na RTX 5080
+   najwyżej 1,09×. Usunięcie kosztu operatorów hosta dawałoby do 12×. To potwierdza wstępną obserwację z testu
+   dymnego ([profilowanie.md](profilowanie.md)).
+2. **Kopie H2D / D2H to 10–15 % oceny**, czyli 1–2 % generacji. Pamięć przypięta (pinned) i strumienie mają więc
+   sens dopiero po przyspieszeniu hosta.
+3. **Koszt MPI (migracja, zakończenie) jest pomijalny** (poniżej 0,2 %). Słabsza skalowalność konfiguracji
+   wielowęzłowych nie wynika z komunikacji, tylko z niejednorodnego tempa wysp (zob. kampania TTT).
+4. **Kernel jest ograniczony potokiem pamięci L1 / LSU, nie obliczeniami ani DRAM.** Wskazuje na to:
+   - wysoka przepustowość pamięci (74–95 %) przy niskiej przepustowości SM (15–20 %);
+   - wysokie trafienia L1 / L2;
+   - przestoje `lg_throttle` (pełna kolejka instrukcji lokalnych i globalnych) i `long_scoreboard`.
+
+   Źródłem są dynamicznie indeksowane tablice `l2p` / `p2l`, które trafiają do pamięci lokalnej, oraz odczyty
+   tabel `dist` / `next_hop` z pamięci globalnej (pamięć współdzielona nie jest używana). Rozbieżność wątków (19,3
+   z 32 aktywnych) wynika z różnej liczby SWAP-ów u różnych osobników.
+5. Na RTX 3060 w przebiegu na 3 hostach kernel dla połowy populacji (131 072) trwał średnio 14,2 ms, a w
+   pojedynczym profilu 10,2 ms dla 262 144, przy dużym rozrzucie (4,9–24,4 ms). Przyczyny nie wyjaśniono. Możliwe,
+   że kartę obciążał wtedy pulpit albo czas zależy od zawartości populacji (liczby SWAP-ów). Do sprawdzenia przy
+   kolejnym profilu.
+
+Wniosek do iteracji II (bez zmian w V0): pierwszy kandydat wydajnościowy to operatory GA na hoście. Najpierw
+drobniejsze zakresy NVTX (selekcja, krzyżowanie, mutacja), potem wielowątkowość albo przeniesienie operatorów na
+GPU. Optymalizacje kernela (tabele w pamięci współdzielonej, `__constant__`) i kopii mają sens dopiero potem.
+
 ## Kandydaci do optymalizacji
 
 **Żaden z poniższych punktów nie jest zaimplementowany w v1.** To lista pomysłów do sprawdzenia po profilowaniu,
-w kolejności wynikającej z wyników, a nie z tej listy.
+w kolejności wynikającej z wyników, a nie z tej listy. Profil V0 (sekcja wyżej) wskazuje najpierw operatory GA
+na hoście; kernel i kopie są drugorzędne, a koszt MPI pomijalny.
 
 - Topologia / interwał migracji przy niejednorodnych wyspach (szybka wyspa z małą populacją może narzucać swoje
   rozwiązanie pozostałym; zob. qaoa_n16 w kampanii TTT V0).
