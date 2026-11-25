@@ -4,8 +4,9 @@ Profilujemy **przed** każdą optymalizacją ([wyniki.md](wyniki.md): wersja →
 Poniższe komendy dotyczą tego projektu (Windows 11, MS-MPI, CUDA 12.9, karty sm_86 i sm_120). Profilowania uruchamia
 użytkownik; zapisane raporty (`.nsys-rep`, `.ncu-rep`) są ignorowane przez git.
 
-> Komendy z `%q{PMI_RANK}` oraz opcje `nsys` / `ncu` wymienione niżej **trzeba zweryfikować** na docelowych
-> komputerach (wersje Nsight mogą się różnić składnią). Błędy zgłaszamy w tym dokumencie.
+> Komendy z [kampania-iteracja-1.md](kampania-iteracja-1.md), krok 7, sprawdzono 2026-11-25 na wszystkich trzech
+> hostach (Nsight Systems 2025.1.3, Nsight Compute 2025.2.1). Znane problemy i obejścia opisuje sekcja
+> „Znane problemy na naszych komputerach” niżej.
 >
 > Profilowanie iteracji I (wersja V0): dokładne komendy dla każdej karty i przebiegu 3-hostowego oraz lista zrzutów
 > ekranu z GUI: [kampania-iteracja-1.md](kampania-iteracja-1.md), kroki 7–8. Ścieżka `nsys` na naszych komputerach:
@@ -96,13 +97,26 @@ Sekcje do przejrzenia w `ncu-ui results\prof\fitness.ncu-rep`:
 - **Warp State Statistics / Source Counters**: rozbieżność wątków i gorące linie w widoku źródła
   (dzięki `--generate-line-info`).
 
+## Znane problemy na naszych komputerach (2026-11-25)
+
+| Objaw | Przyczyna | Obejście |
+|---|---|---|
+| `nsys` przerywa z `boost::filesystem::status: Odmowa dostępu [system:5]: "C:\Users\<użytkownik>\AppData\Local\nvm\…"` | `PATH` zawiera dowiązanie nvm-windows (`C:\nvm4w\nodejs`) do profilu innego użytkownika. `nsys` uruchomiony jako `hpc` nie może go odczytać | przekazać `nsys` oczyszczony `PATH`: `-env PATH $P` w `mpiexec` albo `$env:PATH = $P` przed `nsys stats` (zmienna `$P` jest w kroku 7 kampanii) |
+| `Executable '…\qmap_ga.exe' not found in current directory or standard search paths` (także przy pełnej ścieżce) | na AMG-NORTH `C:\hpc\HPC-quantum-transpilaton` to junction do `E:\mgr\sem2\HPC-quantum-transpilaton`, a `nsys` go nie rozwija; ścieżka względna też zawodzi | na AMG-NORTH podać prawdziwą ścieżkę `E:\…\qmap_ga.exe`, na pozostałych hostach pełną ścieżkę `C:\hpc\…`; dodatkowo `-wdir` w `mpiexec` |
+| `WARNING: CPU sampling / context switches trace requires administrative privileges` | `nsys` działa na koncie `hpc` bez uprawnień administratora | nieszkodliwe: śledzimy tylko `cuda,nvtx` |
+| `ncu` nie ma w katalogu głównym instalacji | jest tam tylko `ncu.bat`, a `ncu.exe` leży w `target\windows-desktop-win7-x64` | ścieżka przez `Get-ChildItem` (krok 7.4 kampanii) |
+| `ncu --import … --page details/raw --csv` kończy się `==ERROR== Failed to handle input report: bad conversion` | błąd konwersji przy eksporcie tekstowym (najpewniej ustawienia regionalne); sam raport jest poprawny | odczyt w `ncu-ui` albo przez moduł Pythona `ncu_report` z `<Nsight Compute>\extras\python` (działa z Pythonem projektu przez `uv run`) |
+
+Wyniki profilu V0: [wyniki.md](wyniki.md), sekcja „Iteracja I – profil V0”.
+
 ## Pierwsza wskazówka z testu dymnego (nie pomiar)
 
 Test dymny: `qft_n12`, `--pop 4096`, RTX 5080, 2 rangi na jednej karcie. Średnio na generację: czas oceny
 (`eval_time_s`) ≈ 0,35 ms, a operatory GA na hoście (`ops_time_s`) ≈ 0,68 ms. Przy małej populacji dominują więc
 **operatory hosta**, nie GPU. To tylko wstępna obserwacja z logów CSV (dwie rangi współdzieliły kartę, jedna próba);
 trzeba ją potwierdzić profilem `nsys` (w szczególności po dodaniu drobniejszych zakresów NVTX dla operatorów),
-zanim cokolwiek zoptymalizujemy.
+zanim cokolwiek zoptymalizujemy. Profil V0 z 2026-11-25 ją potwierdził: operatory hosta to 87–92 % czasu generacji
+([wyniki.md](wyniki.md)).
 
 ## Strona Pythona
 

@@ -189,10 +189,31 @@ Tabela jakości: `results\quality-agg\quality.csv` (najlepszy SWAP GA vs minimum
 
 ## 7. Profilowanie (Nsight Systems, Nsight Compute)
 
-Nsight Systems: `$NSYS = 'C:\Program Files\NVIDIA Corporation\Nsight Systems 2025.1.3\target-windows-x64\nsys.exe'`
-(sprawdź, że ta sama ścieżka istnieje na każdym hoście: `mpiexec -timeout 60 -genv MPICH_NETMASK $NM @H3 cmd /c dir /b
-"C:\Program Files\NVIDIA Corporation"`). Komendy z `%q{PMI_RANK}`, ścieżkami z odstępami i opcjami `nsys` / `ncu`
-**trzeba zweryfikować na docelowych komputerach** ([profilowanie.md](profilowanie.md)); błędy zapisujemy tam.
+Kroki 7.1–7.3 i 7.5 uruchamiamy z okna `hpc` na AMG-NORTH. Komendy sprawdzono 2026-11-25 (Nsight Systems 2025.1.3,
+Nsight Compute 2025.2.1 na wszystkich hostach). Znane problemy i obejścia: [profilowanie.md](profilowanie.md). Przed
+krokami ustaw zmienne:
+
+```powershell
+$NM = "192.168.66.0/255.255.255.0"
+$NSYS = 'C:\Program Files\NVIDIA Corporation\Nsight Systems 2025.1.3\target-windows-x64\nsys.exe'
+$P = ($env:PATH -split ';' | Where-Object { $_ -and $(try { [void](Get-ChildItem -LiteralPath $_ -ErrorAction Stop | Select-Object -First 1); $true } catch { $false }) }) -join ';'
+$WD = 'C:\hpc\HPC-quantum-transpilaton'
+$EXE = 'C:\hpc\HPC-quantum-transpilaton\build\Release\qmap_ga.exe'
+$EXE_L = 'E:\mgr\sem2\HPC-quantum-transpilaton\build\Release\qmap_ga.exe'
+$G = @("--instance", "data\instances\qft_n12.qasm", "--device", "data\devices\falcon27.json", "--pop", "262144", "--generations", "50", "--seed", "1")
+```
+
+Co robią te zmienne:
+
+- `$P` to `PATH` bez katalogów niedostępnych dla konta `hpc`. Bez tego `nsys` zgłasza błąd `boost::filesystem`
+  przez dowiązanie nvm.
+- `$EXE_L` to prawdziwa ścieżka na AMG-NORTH. Przez junction `C:\hpc` `nsys` zgłasza „not found”.
+- `-wdir` w komendach ustala katalog roboczy.
+
+Sprawdzenie, że Nsight jest na każdym hoście:
+`mpiexec -timeout 60 -genv MPICH_NETMASK $NM -hosts 3 192.168.66.61 1 192.168.66.2 1 192.168.66.222 1 cmd /c dir /b
+"C:\Program Files\NVIDIA Corporation"`.
+
 Wszystkie raporty trafiają do `results\prof` na dysku danego hosta (zbieramy w punkcie 7.5).
 
 **7.1 `nsys` na każdej karcie osobno (jedna wyspa, ta sama komenda).** `--pop 262144 --generations 50` na wszystkich
@@ -201,9 +222,9 @@ największego rozmiaru bez `slow` i zapisz to). Nazwa raportu zawiera nazwę hos
 
 ```powershell
 mkdir results\prof -Force | Out-Null
-mpiexec -timeout 300 -genv MPICH_NETMASK $NM -hosts 1 192.168.66.61 1 $NSYS profile -t cuda,nvtx --force-overwrite true --output results\prof\nsys_AMG-NORTH build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 262144 --generations 50 --seed 1 --log results\prof\run_AMG-NORTH.csv
-mpiexec -timeout 300 -genv MPICH_NETMASK $NM -hosts 1 192.168.66.2 1 $NSYS profile -t cuda,nvtx --force-overwrite true --output results\prof\nsys_PS04 build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 262144 --generations 50 --seed 1 --log results\prof\run_PS04.csv
-mpiexec -timeout 300 -genv MPICH_NETMASK $NM -hosts 1 192.168.66.222 1 $NSYS profile -t cuda,nvtx --force-overwrite true --output results\prof\nsys_HyperX_Zuber build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 262144 --generations 50 --seed 1 --log results\prof\run_HyperX_Zuber.csv
+mpiexec -timeout 300 -genv MPICH_NETMASK $NM -wdir $WD -env PATH $P -hosts 1 192.168.66.61 1 $NSYS profile -t cuda,nvtx --force-overwrite true --output results\prof\nsys_AMG-NORTH $EXE_L @G --log results\prof\run_AMG-NORTH.csv
+mpiexec -timeout 300 -genv MPICH_NETMASK $NM -wdir $WD -hosts 1 192.168.66.2 1 $NSYS profile -t cuda,nvtx --force-overwrite true --output results\prof\nsys_PS04 $EXE @G --log results\prof\run_PS04.csv
+mpiexec -timeout 300 -genv MPICH_NETMASK $NM -wdir $WD -hosts 1 192.168.66.222 1 $NSYS profile -t cuda,nvtx --force-overwrite true --output results\prof\nsys_HyperX_Zuber $EXE @G --log results\prof\run_HyperX_Zuber.csv
 ```
 
 **7.2 `nsys` przebiegu na 3 hostach (po jednym raporcie na rank).** Nazwa z rangą przez `%q{PMI_RANK}` (w apostrofach,
@@ -211,12 +232,13 @@ mpiexec -timeout 300 -genv MPICH_NETMASK $NM -hosts 1 192.168.66.222 1 $NSYS pro
 
 ```powershell
 $A = @("--instance", "data\instances\qft_n12.qasm", "--device", "data\devices\falcon27.json", "--max-time", "20", "--generations", "100000", "--seed", "1", "--migration", "adaptiveB", "--topology", "all")
-mpiexec -timeout 300 -genv MPICH_NETMASK $NM -n 1 -host 192.168.66.61 $NSYS profile -t cuda,nvtx --force-overwrite true --output 'results\prof\nsys3_%q{PMI_RANK}' build\Release\qmap_ga.exe @A --pop 262144 --log results\prof\run3.csv : -n 1 -host 192.168.66.2 $NSYS profile -t cuda,nvtx --force-overwrite true --output 'results\prof\nsys3_%q{PMI_RANK}' build\Release\qmap_ga.exe @A --pop 131072 --log results\prof\run3.csv : -n 1 -host 192.168.66.222 $NSYS profile -t cuda,nvtx --force-overwrite true --output 'results\prof\nsys3_%q{PMI_RANK}' build\Release\qmap_ga.exe @A --pop 65536 --log results\prof\run3.csv
+mpiexec -timeout 300 -genv MPICH_NETMASK $NM -wdir $WD -n 1 -host 192.168.66.61 -env PATH $P $NSYS profile -t cuda,nvtx --force-overwrite true --output 'results\prof\nsys3_%q{PMI_RANK}' $EXE_L @A --pop 262144 --log results\prof\run3.csv : -n 1 -host 192.168.66.2 $NSYS profile -t cuda,nvtx --force-overwrite true --output 'results\prof\nsys3_%q{PMI_RANK}' $EXE @A --pop 131072 --log results\prof\run3.csv : -n 1 -host 192.168.66.222 $NSYS profile -t cuda,nvtx --force-overwrite true --output 'results\prof\nsys3_%q{PMI_RANK}' $EXE @A --pop 65536 --log results\prof\run3.csv
 ```
 
-Jeśli `%q{PMI_RANK}` nie działa, użyj trzech osobnych nazw (`nsys3_r0`, `nsys3_r1`, `nsys3_r2`) w trzech sekcjach.
+`%q{PMI_RANK}` działa (raporty `nsys3_0`, `nsys3_1`, `nsys3_2`, każdy na dysku swojego hosta).
 
-**7.3 Raporty tekstowe** (po zebraniu plików lub na hoście, na którym leżą):
+**7.3 Raporty tekstowe** (po zebraniu plików w punkcie 7.5; w oknie `hpc` na AMG-NORTH, w katalogu
+`E:\mgr\sem2\HPC-quantum-transpilaton`, po `$env:PATH = $P`):
 
 ```powershell
 foreach ($f in Get-ChildItem results\prof\*.nsys-rep) {
@@ -227,14 +249,16 @@ foreach ($f in Get-ChildItem results\prof\*.nsys-rep) {
 **7.4 `ncu` na każdej karcie.** Wymaga dostępu do liczników GPU
 ([instalacja-windows.md, Krok 6](instalacja-windows.md)) **na każdym komputerze**. Profilujemy 3 wywołania kernela
 fitness (`--generations 3`; pełny zestaw sekcji spowalnia kernel wielokrotnie). Najprościej uruchomić lokalnie na każdym
-hoście (będziemy tam i tak otwierać GUI):
+hoście, w oknie **Administratora** (liczniki GPU). Na AMG-NORTH pracuj w `E:\mgr\sem2\HPC-quantum-transpilaton`, na
+pozostałych hostach w `C:\hpc\HPC-quantum-transpilaton`:
 
 ```powershell
-$NCU = (Get-ChildItem 'C:\Program Files\NVIDIA Corporation\Nsight Compute*\ncu.exe' | Select-Object -Last 1).FullName
+$NCU = (Get-ChildItem 'C:\Program Files\NVIDIA Corporation\Nsight Compute*\target\windows-desktop-win7-x64\ncu.exe' | Select-Object -Last 1).FullName
 & $NCU --set full -k regex:fitness -c 3 --force-overwrite -o "results\prof\ncu_$env:COMPUTERNAME" build\Release\qmap_ga.exe --instance data\instances\qft_n12.qasm --device data\devices\falcon27.json --pop 262144 --generations 3 --seed 1
 ```
 
-(Zdalnie: ta sama komenda z pełną ścieżką `ncu.exe` po `mpiexec -hosts 1 <ip> 1`; nazwa raportu `ncu_<host>` ręcznie.)
+(`ncu.exe` leży w `target\windows-desktop-win7-x64`; w katalogu głównym instalacji jest tylko `ncu.bat`.
+Zdalnie: ta sama komenda z pełną ścieżką `ncu.exe` po `mpiexec -hosts 1 <ip> 1`; nazwa raportu `ncu_<host>` ręcznie.)
 
 **7.5 Zebranie raportów** (skrypt `collect-results.ps1` kopiuje tylko logi, więc profile ręcznie; duże pliki):
 
