@@ -260,6 +260,75 @@ def cmd_aggregate(a):
         print(q.to_string(index=False))
 
 
+COMPARE_COLS = ["target", "success_rate", "median_ttt_s", "throughput", "best_min"]
+
+
+def compare_versions(old, new, labels=("v0", "v1")):
+    """Join two aggregate_runs tables on (config, instance, eps).
+
+    ttt_ratio = old / new censored median TTT (NaN when either median is censored: the success rates then carry the
+    comparison); throughput_ratio = new / old summed rank throughput."""
+    k = ["config", "instance", "eps"]
+    lo, ln = labels
+    out = old[k + COMPARE_COLS].merge(new[k + COMPARE_COLS], on=k, suffixes=(f"_{lo}", f"_{ln}"))
+    if not (out[f"target_{lo}"] == out[f"target_{ln}"]).all():
+        raise SystemExit("compare: targets differ between versions (different targets.csv?)")
+    out = out.drop(columns=f"target_{ln}").rename(columns={f"target_{lo}": "target"})
+    out["ttt_ratio"] = out[f"median_ttt_s_{lo}"] / out[f"median_ttt_s_{ln}"]
+    out["throughput_ratio"] = out[f"throughput_{ln}"] / out[f"throughput_{lo}"]
+    return out
+
+
+def cmd_compare(a):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    targets = read_targets(a.targets) if Path(a.targets).exists() else None
+    old, new = (aggregate_runs(load_runs(r, targets), a.baseline_config) for r in (a.old, a.new))
+    lo, ln = a.labels
+    cmp = compare_versions(old, new, (lo, ln))
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    cmp.to_csv(out / f"compare_{lo}_{ln}.csv", index=False, lineterminator="\n")
+    print(cmp.to_string(index=False))
+    configs = [c for c in DEFAULT_CONFIGS if c in set(cmp["config"])] + \
+        sorted(set(cmp["config"]) - set(DEFAULT_CONFIGS))
+    instances = sorted(set(cmp["instance"]))
+    x = np.arange(len(configs))
+    for eps, g in cmp.groupby("eps"):  # one figure per eps: panels = instances, bars = configs x versions
+        cols = min(2, len(instances))
+        rows = math.ceil(len(instances) / cols)
+        fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 3.6 * rows), squeeze=False)
+        for ax, instance in zip(axes.flat, instances):
+            d = g[g["instance"] == instance].set_index("config")
+            for j, (lab, color) in enumerate([(lo, "#9aa5b1"), (ln, "#2a6fdb")]):
+                med = [d[f"median_ttt_s_{lab}"].get(c, math.nan) for c in configs]
+                sr = [d[f"success_rate_{lab}"].get(c, math.nan) for c in configs]
+                xs = x + (j - 0.5) * 0.38
+                done = [m if not math.isnan(m) else 0 for m in med]
+                ax.bar(xs, done, 0.38, color=color, label=lab)
+                # censored median (fewer than half of the runs reached the target): hatched bar up to the limit
+                cens = [a.max_time if math.isnan(m) and not math.isnan(s) else 0 for m, s in zip(med, sr)]
+                ax.bar(xs, cens, 0.38, fill=False, hatch="//", edgecolor=color)
+                for xi, m, s in zip(xs, med, sr):
+                    if not math.isnan(s):
+                        top = a.max_time if math.isnan(m) else m
+                        ax.text(xi, top * 1.08, f"{s:.0%}", ha="center", va="bottom", fontsize=7)
+            ax.set_yscale("log")
+            ax.set_xticks(x, [c.replace("+", "+\n") for c in configs], fontsize=7)
+            ax.set(title=f"{instance}, target {d['target'].iloc[0] if len(d) else ''}", ylabel="median TTT [s]")
+            ax.set_ylim(top=a.max_time * 3)
+        for ax in list(axes.flat)[len(instances):]:
+            ax.axis("off")
+        axes.flat[0].legend(fontsize=8)
+        fig.suptitle(f"{lo} vs {ln}, {eps} (labels: success rate; hatched: median censored at {a.max_time:g} s)",
+                     fontsize=9)
+        fig.tight_layout()
+        fig.savefig(out / f"compare_{lo}_{ln}_{eps}.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+
 def cmd_validate_runs(a):
     from qmap.device import load_device
     from qmap.instances import load_instance, loads
@@ -680,6 +749,16 @@ def build_parser():
     p.add_argument("--out", default="results")
     p.add_argument("--baseline-config", default="rtx5080")
     p.set_defaults(func=cmd_aggregate)
+
+    p = sub.add_parser("compare", help="two campaigns (e.g. V0 vs V1): median TTT, success rate, throughput")
+    p.add_argument("--old", default="results/runs")
+    p.add_argument("--new", default="results/runs-v1")
+    p.add_argument("--labels", nargs=2, default=["v0", "v1"])
+    p.add_argument("--targets", default="results/pilot/targets.csv", help="maps ttt_by_target keys to eps")
+    p.add_argument("--baseline-config", default="rtx5080")
+    p.add_argument("--max-time", type=float, default=120, help="run limit (height of censored bars)")
+    p.add_argument("--out", default="results/plots")
+    p.set_defaults(func=cmd_compare)
 
     p = sub.add_parser("validate-runs", help="run qmap.validate (k=1) on every best.qasm; writes validate.json")
     p.add_argument("--runs", default="results/runs")

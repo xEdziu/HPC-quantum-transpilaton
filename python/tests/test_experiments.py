@@ -170,6 +170,19 @@ def test_aggregate_speedup_and_efficiency():
     assert math.isnan(agg.loc["rtx5080+rtx5070", "speedup"])
 
 
+def test_compare_versions():
+    old = ex.aggregate_runs(make_df([("rtx5080", [4, 2, 3, 9, 8], 100.0), ("rtx5080+rtx3060", [1, None, None], 150.0)]))
+    new = ex.aggregate_runs(make_df([("rtx5080", [1, 1, 2, 2, 3], 400.0), ("rtx5080+rtx3060", [1, 2, 3], 600.0)]))
+    c = ex.compare_versions(old, new).set_index("config")
+    assert c.loc["rtx5080", "ttt_ratio"] == pytest.approx(4 / 2)
+    assert c.loc["rtx5080", "throughput_ratio"] == pytest.approx(4.0)
+    assert math.isnan(c.loc["rtx5080+rtx3060", "ttt_ratio"])  # old median censored
+    assert c.loc["rtx5080+rtx3060", "success_rate_v1"] == 1.0
+    assert "target" in c.columns and "target_v1" not in c.columns
+    with pytest.raises(SystemExit):
+        ex.compare_versions(old, new.assign(target=9))
+
+
 def test_load_runs_and_quality(tmp_path):
     for cfg, rep, ttt in [("rtx5080", 1, 2.0), ("rtx5080", 2, None)]:
         d = tmp_path / "runs" / cfg / "qft_n8" / "eps0.10" / f"rep{rep}"
