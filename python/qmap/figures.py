@@ -122,7 +122,7 @@ def table_device(out):
     s = device_summary()
     hist = ", ".join(f"{k}: {v}" for k, v in s["degree_histogram"].items())
     rows = [
-        ["Urządzenie", f"\\texttt{{{s['name']}}} (IBM Falcon)"],
+        ["Urządzenie", f"\\texttt{{{s['name'].replace('_', chr(92) + '_')}}} (IBM Falcon)"],
         ["Kubity fizyczne", s["qubits"]],
         ["Krawędzie (nieskierowane)", s["edges"]],
         ["Maks. odległość w grafie", s["max_distance"]],

@@ -17,3 +17,9 @@ def test_latex_table_and_device_summary():
     s = figures.device_summary()
     assert (s["qubits"], s["edges"]) == (27, 28)
     assert sum(s["degree_histogram"].values()) == 27
+
+
+def test_table_device_escapes_name(tmp_path):
+    figures.table_device(tmp_path)
+    text = (tmp_path / "device_falcon27.tex").read_text(encoding="utf-8")
+    assert r"\texttt{fake\_kolkata}" in text
